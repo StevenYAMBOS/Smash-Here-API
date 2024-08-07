@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/StevenYAMBOS/main/database"
+	"github.com/StevenYAMBOS/main/api/database"
+	"github.com/StevenYAMBOS/main/routes/auth"
 	"github.com/joho/godotenv"
-	// "github.com/StevenYAMBOS/main/routes"
 )
 
 func main() {
@@ -21,27 +21,13 @@ func main() {
 	// Port
 	PORT := os.Getenv("PORT")
 
-	// handler := func(res http.ResponseWriter, req *http.Request) {
-	// 	fmt.Fprintf(res, "Marhaba Misterr Wick 🧘🏽🧘🏽🧘🏽") // Respond with "Hello, World!"
-	//  }
-
 	// Route principale de l'application
 	router := http.NewServeMux()
 
 	router.HandleFunc("/", homeHandler)
-	router.HandleFunc("/auth", authHandler)
+	router.Handle("/auth", auth.AuthHandler())
 
-	// router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	// 	fmt.Fprint(w, "Bienvenue sur Smash Here")
-	// 	fmt.Println(w, "\n [LOG] Bienvenue sur Smash Here")
-	// })
-
-	// router.HandleFunc("/auth", func(w http.ResponseWriter, req *http.Request) {
-	// 	fmt.Fprint(w, "Routes pour s'inscrire teste")
-	// 	fmt.Println(w, "\n [LOG] Routes pour s'inscrire teste")
-	// })
-
-	// fmt.Println("Application lancée : http://localhost" + PORT)
+	fmt.Println("Application lancée : http://localhost" + PORT)
 
 	// Lancement de la base de données
 	database.InitDatabase()
@@ -55,9 +41,4 @@ func main() {
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Bienvenue sur Smash Here")
 	fmt.Println(w, "\n [LOG] Bienvenue sur Smash Here")
-}
-
-func authHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Routes pour s'inscrire teste")
-	fmt.Println(w, "\n [LOG] Routes pour s'inscrire teste")
 }

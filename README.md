@@ -27,8 +27,8 @@ Dépôt Back-End de l'application Smash Here.
 ## Installation
 
 ```shell
-git clone 
-cd 
+git clone https://github.com/StevenYAMBOS/Smash-Here-API
+cd Smash-Here-API-main
 ```
 
 ## Lancer l'application
@@ -43,16 +43,12 @@ go run cmd/main.go
 - [Documentation]()
 - [Smash Here Website]()
 
----
-
 ## Autheur
 
 ### Steven YAMBOS
 
 <a href="https://github.com/StevenYAMBOS"><img src="https://cdn-icons-png.flaticon.com/512/25/25231.png" width="30px" alt="" /><a/>
 <a href="https://x.com/StevenYambos"><img src="https://img.freepik.com/vecteurs-libre/nouvelle-conception-icone-x-du-logo-twitter-2023_1017-45418.jpg?size=338&ext=jpg&ga=GA1.1.2008272138.1722902400&semt=ais_hybrid" width="30px" alt="X Steven YAMBOS" /><a/>
-
----
 
 ## License
 
