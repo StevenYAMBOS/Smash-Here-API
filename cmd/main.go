@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/StevenYAMBOS/main/api/database"
-	"github.com/StevenYAMBOS/main/routes/auth"
+	"github.com/StevenYAMBOS/Smash-Here-API/api/database"
+	"github.com/StevenYAMBOS/Smash-Here-API/internal/routes"
 	"github.com/joho/godotenv"
 )
 
@@ -22,10 +22,7 @@ func main() {
 	PORT := os.Getenv("PORT")
 
 	// Route principale de l'application
-	router := http.NewServeMux()
-
-	router.HandleFunc("/", homeHandler)
-	router.Handle("/auth", auth.AuthHandler())
+	router := routes.Router()
 
 	fmt.Println("Application lancée : http://localhost" + PORT)
 
@@ -33,12 +30,7 @@ func main() {
 	database.InitDatabase()
 
 	// Lancement de l'application
-	if err := http.ListenAndServe(PORT, router); err != nil {
+	if err := http.ListenAndServe(":"+PORT, router); err != nil {
 		fmt.Println("Erreur serveur : ", err)
 	}
-}
-
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Bienvenue sur Smash Here")
-	fmt.Println(w, "\n [LOG] Bienvenue sur Smash Here")
 }

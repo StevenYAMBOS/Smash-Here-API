@@ -1,4 +1,4 @@
-module github.com/StevenYAMBOS/main
+module github.com/StevenYAMBOS/Smash-Here-API
 
 go 1.18
 
