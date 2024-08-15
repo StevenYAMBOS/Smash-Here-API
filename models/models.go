@@ -1,3 +1,5 @@
+// models/models.go
+
 package models
 
 import (
@@ -6,42 +8,44 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// les champs doivent avoir des majuscules sinon on a l'erreur : "struct field 'nom_du_champ' has json tag but is not exported"
+
 type User struct {
 	ID             primitive.ObjectID `bson:"_id"`
-	uid            string             `json:"uid"`
-	username       *string            `json:"username" validate:"required", min=2, max=100`
-	email          *string            `json:"email" validate:"email, required"`
-	password       *string            `json:"password" validate:"required", min=6, max=100`
-	profilePicture *string            `json:"profilePicture"`
-	isSuperUser    bool               `json:"isSuperUser"`
-	createdAt      time.Time          `json:"createdAt"`
-	updatedAt      time.Time          `json:"updatedAt"`
-	lastLogin      time.Time          `json:"lastLogin"`
+	Uid            string             `json:"uid"`
+	Username       *string            `json:"username"`
+	Email          *string            `json:"email"`
+	Password       *string            `json:"password"`
+	ProfilePicture *string            `json:"profilePicture"`
+	IsSuperUser    bool               `json:"isSuperUser"`
+	CreatedAt      time.Time          `json:"createdAt"`
+	UpdatedAt      time.Time          `json:"updatedAt"`
+	LastLogin      time.Time          `json:"lastLogin"`
 	Roadmaps       []Roadmap          `json:"Roadmaps"`
 	Bookmarks      []Roadmap          `json:"Bookmarks"`
 }
 
 type Roadmap struct {
 	ID          primitive.ObjectID `bson:"_id"`
-	uid         string             `json:"uid"`
-	title       *string            `json:"title" validate:"required"`
-	description *string            `json:"description" validate:"required"`
-	cover       *string            `json:"cover"`
-	published   bool               `json:"published"`
-	createdAt   time.Time          `json:"createdAt"`
-	updatedAt   time.Time          `json:"updatedAt"`
+	Uid         string             `json:"uid"`
+	Title       *string            `json:"title"`
+	Description *string            `json:"description"`
+	Cover       *string            `json:"cover"`
+	Published   bool               `json:"published"`
+	CreatedAt   time.Time          `json:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt"`
 	Games       []Game             `json:"Game"`
 	Users       []User             `json:"Users"`
 }
 
 type Game struct {
 	ID          primitive.ObjectID `bson:"_id"`
-	uid         string             `json:"uid"`
-	title       *string            `json:"title" validate:"required"`
-	description *string            `json:"description" validate:"required"`
-	cover       *string            `json:"cover"`
+	Uid         string             `json:"uid"`
+	Title       *string            `json:"title"`
+	Description *string            `json:"description"`
+	Cover       *string            `json:"cover"`
 	Type        string             `json:"type"`
-	createdAt   time.Time          `json:"createdAt"`
-	updatedAt   time.Time          `json:"updatedAt"`
+	CreatedAt   time.Time          `json:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt"`
 	Roadmaps    []Roadmap          `json:"Roadmaps"`
 }

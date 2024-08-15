@@ -1,9 +1,13 @@
+// api/jwt/jwt_token.go
+
 package token
 
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -11,7 +15,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func createToken(email string) (string, error) {
+func CreateToken(email string) (string, error) {
 	// Variable d'environnement
 	err := godotenv.Load("SECRETE_KEY")
 	if err != nil {
@@ -34,24 +38,44 @@ func createToken(email string) (string, error) {
 	return tokenString, nil
 }
 
-func verifyToken(tokenString string) error {
-	err := godotenv.Load("SECRETE_KEY")
+func VerifyToken(tokenString string) (*jwt.Token, error) {
+	err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatalf("Erreur lors du chargement des variables d'environnement: %s", err)
+		return nil, fmt.Errorf("Erreur lors du chargement des variables d'environnement: %s", err)
 	}
-	SECRETE_KEY := os.Getenv("SECRETE_KEY")
+	SECRETE_KEY := []byte(os.Getenv("SECRETE_KEY"))
 
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("méthode de signature inattendue : %v", token.Header["alg"])
+		}
 		return SECRETE_KEY, nil
 	})
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if !token.Valid {
-		return fmt.Errorf("token invalide")
-	}
+	return token, nil
+}
 
-	return nil
+
+func ProtectedHandler(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			http.Error(w, "Header d'authentification manquant.", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString = strings.TrimSpace(tokenString[len("Bearer "):])
+
+		token, err := VerifyToken(tokenString)
+		if err != nil || !token.Valid {
+			http.Error(w, "Token invalide.", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
 }
