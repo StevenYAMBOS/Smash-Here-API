@@ -1,8 +1,9 @@
-# Smash here API
 
 <p align="center">
-  <img src="https://3238leblogdemarvelll-1278.kxcdn.com/wp-content/uploads/2012/05/Street-Fighter-X-Tekken-Banniere.jpg" alt="Smash Here banner" width="738">
+  <img src="assets/flame.webp" alt="Smash Here logo" width="400">
 </p>
+
+# Smash here API
 
 ## Description
 
@@ -10,10 +11,9 @@ Dépôt Back-End de l'application Smash Here.
 
 ## Technologies utilisées
 
-- **Golang** <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Go_Logo_Blue.svg/1200px-Go_Logo_Blue.svg.png" width="30px" alt="Golang logo" />
-- **MongoDB** <img src="https://www.svgrepo.com/show/331488/mongodb.svg" width="30px" alt="MongoDB logo" />
-- **Docker** <img src="https://cdn4.iconfinder.com/data/icons/logos-and-brands/512/97_Docker_logo_logos-512.png" width="30px" alt="Docker logo" />
-- **Swagger** <img src="https://upload.wikimedia.org/wikipedia/commons/a/ab/Swagger-logo.png" width="30px" alt="Swagger logo" />
+- ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
+- ![MongoDB](https://img.shields.io/badge/MongoDB-%234ea94b.svg?style=for-the-badge&logo=mongodb&logoColor=white)
+- ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 
 ## Fonctionnalités
 
@@ -24,14 +24,26 @@ Dépôt Back-End de l'application Smash Here.
 - Partage des roadmaps
 - Notation (vote) des roadmaps
 
-## Installation
+## Lancer le projet
+
+### Installation
 
 ```shell
 git clone https://github.com/StevenYAMBOS/Smash-Here-API
 cd Smash-Here-API-main
 ```
 
-## Lancer l'application
+### Variables d'environnements
+
+Créer un fichier `.env` à la racine du projet (au même niveau que le fichier `go.mod`) et ajouter les informations suivantes :
+
+```shell
+PORT=
+DATABASE_URL=
+SECRETE_KEY=
+```
+
+### Lancement
 
 ```bash
 go run cmd/main.go
