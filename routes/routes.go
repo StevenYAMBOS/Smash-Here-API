@@ -20,8 +20,6 @@ import (
 
 /* ==================== Initialisations ==================== */
 
-// var userCollection = database.Client.Database("smashheredb").Collection("user")
-
 // ==================== Fonctions générales  ====================
 
 // Hacher le mot de passe
@@ -70,9 +68,14 @@ func verifyToken(tokenString string) error {
 	if err != nil {
 		log.Fatalf("Erreur lors du chargement des variables d'environnement: %s", err)
 	}
-	var SECRET_KEY = os.Getenv("SECRET_KEY")
+
+	SECRET_KEY := os.Getenv("SECRET_KEY")
+	if SECRET_KEY == "" {
+		return fmt.Errorf("Clé secrète manquante")
+	}
+
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return SECRET_KEY, nil
+		return []byte(SECRET_KEY), nil
 	})
 
 	if err != nil {
@@ -86,27 +89,57 @@ func verifyToken(tokenString string) error {
 	return nil
 }
 
-// Middleware de connexion
-func ProtectedHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	tokenString := r.Header.Get("Authorization")
-	if tokenString == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Missing authorization header")
-		return
+// Middleware d'authentification
+func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+			return
+		}
+
+		// Supprimer le préfixe "Bearer " s'il est présent
+		if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+			tokenString = tokenString[7:]
+		}
+
+		// Vérifier le token
+		err := verifyToken(tokenString)
+		if err != nil {
+			http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+			return
+		}
+
+		// Si le token est valide, continuer avec la requête
+		next(w, r)
 	}
-	tokenString = tokenString[len("Bearer "):]
-
-	err := verifyToken(tokenString)
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Token invalide")
-		return
-	}
-
-	fmt.Fprint(w, "Welcome to the the protected area")
-
 }
+
+// Extraire l'email du token
+func extractEmailFromToken(tokenString string) (string, error) {
+	SECRET_KEY := os.Getenv("SECRET_KEY")
+	if SECRET_KEY == "" {
+		return "", fmt.Errorf("Clé secrète introuvable")
+	}
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(SECRET_KEY), nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	// Vérifier et récupérer les claims
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		if email, exists := claims["email"].(string); exists {
+			return email, nil
+		}
+	}
+
+	return "", fmt.Errorf("Token invalide ou email manquant")
+}
+
 
 // ==================== ROUTEUR ====================
 
@@ -116,6 +149,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("/", home)
 	mux.HandleFunc("POST /auth/register", register)
 	mux.HandleFunc("POST /auth/login", login)
+	mux.HandleFunc("POST /admin/roadmap", AuthMiddleware(addRoadmap))
 
 	return mux
 }
@@ -206,8 +240,6 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// fmt.Printf("Données de la requête utilisateur %v", user)
-
 	// Vérification des champs obligatoires
 	if user.Email == nil || user.Password == nil {
 		http.Error(w, "Email et mot de passe sont requis", http.StatusBadRequest)
@@ -252,3 +284,88 @@ func login(w http.ResponseWriter, r *http.Request) {
 	// Envoi du token au client
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 }
+
+// ---------- ROADMAPS  ----------
+
+func addRoadmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
+		return
+	}
+
+	// Décoder la roadmap reçue en JSON
+	var roadmap models.Roadmap
+	err = json.NewDecoder(r.Body).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Validation des champs obligatoires
+	if roadmap.Title == nil || roadmap.Description == nil {
+		http.Error(w, "Le titre et la description sont obligatoires", http.StatusBadRequest)
+		return
+	}
+
+	// Initialisation des champs de la roadmap
+	roadmap.ID = primitive.NewObjectID()
+	roadmap.CreatedBy = user.ID
+	roadmap.UpdatedBy = user.ID
+	roadmap.CreatedAt = time.Now()
+	roadmap.UpdatedAt = time.Now()
+	roadmap.Published = new(bool) // Par défaut non publié
+	roadmap.Premium = new(bool)    // Par défaut non premium
+	roadmap.ViewsPerDay = new(int)
+	roadmap.ViewsPerWeek = new(int)
+	roadmap.ViewsPerMonth = new(int)
+	roadmap.TotalViews = new(int)
+
+	// Insérer la roadmap en base de données
+	collection := database.Client.Database("smashheredb").Collection("roadmap")
+	_, err = collection.InsertOne(ctx, roadmap)
+	if err != nil {
+		http.Error(w, "Erreur lors de l'ajout de la roadmap", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse de succès
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Roadmap créée avec succès"})
+}
+

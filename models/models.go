@@ -27,41 +27,104 @@ import (
 
 // les champs doivent avoir des majuscules sinon on a l'erreur : "struct field 'nom_du_champ' has json tag but is not exported"
 
+// Utilisateur
 type User struct {
-	ID              primitive.ObjectID `bson:"_id"`
-	Username        *string            `json:"username" bson:"username" binding:"required"`
-	Email           *string            `json:"email" bson:"email" binding:"required"`
-	Password        *string            `json:"password" bson:"password" binding:"required"`
-	ProfilePicture  *string            `json:"profilePicture" bson:"profilePicture"`
-	IsSuperUser     bool               `json:"isSuperUser" bson:"isSuperUser"`
-	CreatedAt       time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt       time.Time          `json:"updatedAt" bson:"updatedAt"`
-	LastLogin       time.Time          `json:"lastLogin" bson:"lastLogin"`
-	RoadmapsStarted []Roadmap          `json:"RoadmapsStarted" bson:"RoadmapsStarted"`
-	Bookmarks       []Roadmap          `json:"Bookmarks" bson:"Bookmarks"`
+	ID              primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
+	Username        *string              `bson:"username,omitempty" json:"username"`
+	Email           *string              `bson:"email,omitempty" json:"email"`
+	Password        *string              `bson:"password,omitempty" json:"password"`
+	ProfilePicture  *string              `bson:"profileImage,omitempty" json:"profileImage"`
+	Type            *string              `bson:"type,omitempty" json:"type"` // "superadmin", "coach", "user"
+	CreatedAt       time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt       time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
+	LastLogin       time.Time            `bson:"lastLogin,omitempty" json:"lastLogin"`
+	Bookmarks       []primitive.ObjectID `bson:"Bookmarks,omitempty" json:"Bookmarks"`
+	RoadmapsStarted []primitive.ObjectID `bson:"RoadmapsStarted,omitempty" json:"RoadmapsStarted"`
 }
 
+// Roadmap
 type Roadmap struct {
-	ID          primitive.ObjectID `bson:"_id"`
-	Uid         string             `json:"uid"`
-	Title       *string            `json:"title"`
-	Description *string            `json:"description"`
-	Cover       *string            `json:"cover"`
-	Published   bool               `json:"published"`
-	CreatedAt   time.Time          `json:"createdAt"`
-	UpdatedAt   time.Time          `json:"updatedAt"`
-	Games       []Game             `json:"Game"`
-	Users       []User             `json:"Users"`
+	ID            primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
+	Title         *string              `bson:"title,omitempty" json:"title"`
+	SubTitle      *string              `bson:"subTitle,omitempty" json:"subTitle"`
+	Description   *string              `bson:"description,omitempty" json:"description"`
+	Published     *bool                `bson:"published,omitempty" json:"published"`
+	Premium       *bool                `bson:"premium,omitempty" json:"premium"`
+	ViewsPerDay   *int                 `bson:"viewsPerDay,omitempty" json:"viewsPerDay"`
+	ViewsPerWeek  *int                 `bson:"viewsPerWeek,omitempty" json:"viewsPerWeek"`
+	ViewsPerMonth *int                 `bson:"viewsPerMonth,omitempty" json:"viewsPerMonth"`
+	TotalViews    *int                 `bson:"totalViews,omitempty" json:"totalViews"`
+	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
+	UpdatedBy     primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
+	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
+	Games         []primitive.ObjectID `bson:"Games,omitempty" json:"Games"`
+	Steps         []primitive.ObjectID `bson:"Steps,omitempty" json:"Steps"`
+	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
 }
 
+// Étape d'une roadmap
+type Step struct {
+	ID            primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
+	Title         *string              `bson:"title,omitempty" json:"title"`
+	Subtitle      *string              `bson:"subtitle,omitempty" json:"subtitle"`
+	Description   *string              `bson:"description,omitempty" json:"description"`
+	Roadmaps      []primitive.ObjectID `bson:"Roadmaps,omitempty" json:"Roadmaps"`
+	Contents      []primitive.ObjectID `bson:"Contents,omitempty" json:"Contents"`
+	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
+	PreviousSteps []primitive.ObjectID `bson:"PreviousSteps,omitempty" json:"PreviousSteps"`
+	NextSteps     []primitive.ObjectID `bson:"NextSteps,omitempty" json:"NextSteps"`
+	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
+}
+
+// Contenu associé à une étape
+type Content struct {
+	ID        primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
+	Title     *string              `bson:"title,omitempty" json:"title"`
+	Type      *string              `bson:"type,omitempty" json:"type"` // "video", "article", "page", "roadmap"
+	Link      *string              `bson:"link,omitempty" json:"link"`
+	Tags      []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
+	CreatedBy primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
+	UpdatedBy primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
+	CreatedAt time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
+}
+
+// Progression utilisateur sur une roadmap
+type Progression struct {
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	User      primitive.ObjectID `bson:"User,omitempty" json:"User"`
+	Roadmap   primitive.ObjectID `bson:"Roadmap,omitempty" json:"Roadmap"`
+	Step      primitive.ObjectID `bson:"Step,omitempty" json:"Step"`
+	Status    *string            `bson:"status,omitempty" json:"status"` // "pending", "inProgress", "done", "skipped"
+	UpdatedAt time.Time          `bson:"updatedAt,omitempty" json:"updatedAt"`
+}
+
+// Tags pour roadmaps, étapes et contenus
+type Tag struct {
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name      *string            `bson:"name,omitempty" json:"name"`
+	CreatedBy primitive.ObjectID `bson:"CreatedBy,omitempty" json:"CreatedBy"`
+	UpdatedBy primitive.ObjectID `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
+	CreatedAt time.Time          `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt time.Time          `bson:"updatedAt,omitempty" json:"updatedAt"`
+}
+
+// Jeux liés aux roadmaps
 type Game struct {
-	ID          primitive.ObjectID `bson:"_id"`
-	Uid         string             `json:"uid"`
-	Title       *string            `json:"title"`
-	Description *string            `json:"description"`
-	Cover       *string            `json:"cover"`
-	Type        string             `json:"type"`
-	CreatedAt   time.Time          `json:"createdAt"`
-	UpdatedAt   time.Time          `json:"updatedAt"`
-	Roadmaps    []Roadmap          `json:"Roadmaps"`
+	ID            primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
+	Title         *string              `bson:"title,omitempty" json:"title"`
+	Subtitle      *string              `bson:"subtitle,omitempty" json:"subtitle"`
+	Description   *string              `bson:"description,omitempty" json:"description"`
+	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
+	UpdatedBy     primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
+	Roadmaps      []primitive.ObjectID `bson:"Roadmaps,omitempty" json:"Roadmaps"`
+	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
+	ViewsPerDay   *int                 `bson:"viewsPerDay,omitempty" json:"viewsPerDay"`
+	ViewsPerWeek  *int                 `bson:"viewsPerWeek,omitempty" json:"viewsPerWeek"`
+	ViewsPerMonth *int                 `bson:"viewsPerMonth,omitempty" json:"viewsPerMonth"`
+	TotalViews    *int                 `bson:"totalViews,omitempty" json:"totalViews"`
+	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
 }
