@@ -34,7 +34,7 @@ type User struct {
 	Email           *string              `bson:"email,omitempty" json:"email"`
 	Password        *string              `bson:"password,omitempty" json:"password"`
 	ProfilePicture  *string              `bson:"profileImage,omitempty" json:"profileImage"`
-	Type            *string              `bson:"type,omitempty" json:"type"` // "superadmin", "coach", "user"
+	Type            *string              `bson:"type,omitempty" json:"type"`
 	CreatedAt       time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt       time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
 	LastLogin       time.Time            `bson:"lastLogin,omitempty" json:"lastLogin"`
@@ -117,6 +117,7 @@ type Game struct {
 	Title         *string              `bson:"title,omitempty" json:"title"`
 	Subtitle      *string              `bson:"subtitle,omitempty" json:"subtitle"`
 	Description   *string              `bson:"description,omitempty" json:"description"`
+	Cover         *string              `bson:"cover,omitempty" json:"cover"`
 	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
 	UpdatedBy     primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
 	Roadmaps      []primitive.ObjectID `bson:"Roadmaps,omitempty" json:"Roadmaps"`
@@ -125,6 +126,7 @@ type Game struct {
 	ViewsPerWeek  *int                 `bson:"viewsPerWeek,omitempty" json:"viewsPerWeek"`
 	ViewsPerMonth *int                 `bson:"viewsPerMonth,omitempty" json:"viewsPerMonth"`
 	TotalViews    *int                 `bson:"totalViews,omitempty" json:"totalViews"`
+	Published     *bool                `bson:"published,omitempty" json:"published"`
 	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
 }
