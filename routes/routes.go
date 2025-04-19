@@ -155,6 +155,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
+	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
 	mux.HandleFunc("DELETE /superadmin/roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
 	// Jeux
 	mux.HandleFunc("POST /superadmin/game", AuthMiddleware(createGame))
@@ -338,7 +339,7 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Décoder la roadmap reçue en JSON
+	// Décoder le jeu reçu en JSON
 	var game models.Game
 	err = json.NewDecoder(r.Body).Decode(&game)
 	if err != nil {
@@ -358,13 +359,13 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 	game.UpdatedBy = user.ID
 	game.CreatedAt = time.Now()
 	game.UpdatedAt = time.Now()
-	game.Published = new(bool) // Par défaut non publié
+	game.Published = new(bool)
 	game.ViewsPerDay = new(int)
 	game.ViewsPerWeek = new(int)
 	game.ViewsPerMonth = new(int)
 	game.TotalViews = new(int)
 
-	// Insérer la "game" en base de données
+	// Insérer le jeu en base de données
 	collection := database.Client.Database("smashheredb").Collection("game")
 	_, err = collection.InsertOne(ctx, game)
 	if err != nil {
@@ -761,4 +762,106 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(result)
 	w.Write([]byte("Roadmap supprimée avec succès"))
+}
+
+// Modifier une roadmap
+func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+	if user.Type == nil || (*user.Type == "user") {
+		http.Error(w, "Accès refusé", http.StatusForbidden)
+		return
+	}
+
+	// Récupérer l'ID de la roadmap
+	roadmapIDStr := strings.TrimPrefix(r.URL.Path, "/roadmap/")
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	if err != nil {
+		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Body à mettre à jour
+	var updatedRoadmap models.Roadmap
+	if err := json.NewDecoder(r.Body).Decode(&updatedRoadmap); err != nil {
+		http.Error(w, "Corps invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Construction du $set dynamique
+	updateFields := bson.M{}
+	if updatedRoadmap.Title != nil {
+		updateFields["title"] = updatedRoadmap.Title
+	}
+	if updatedRoadmap.SubTitle != nil {
+		updateFields["subTitle"] = updatedRoadmap.SubTitle
+	}
+	if updatedRoadmap.Description != nil {
+		updateFields["description"] = updatedRoadmap.Description
+	}
+	if updatedRoadmap.Published != nil {
+		updateFields["published"] = updatedRoadmap.Published
+	}
+	if updatedRoadmap.Premium != nil {
+		updateFields["premium"] = updatedRoadmap.Premium
+	}
+	if updatedRoadmap.Tags != nil {
+		updateFields["Tags"] = updatedRoadmap.Tags
+	}
+	// Champs automatiques
+	updateFields["UpdatedAt"] = time.Now()
+	updateFields["UpdatedBy"] = user.ID
+
+	// Si aucun champ modifié
+	if len(updateFields) == 0 {
+		http.Error(w, "Aucun champ valide à modifier", http.StatusBadRequest)
+		return
+	}
+
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	filter := bson.M{"_id": roadmapID}
+	update := bson.M{"$set": updateFields}
+	result, err := roadmapCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Aucune roadmap trouvée", http.StatusNotFound)
+		return
+	}
+
+	// Réponse OK
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Roadmap modifiée avec succès",
+		"updated_at": time.Now(),
+		"modified":   result.ModifiedCount,
+	})
 }
