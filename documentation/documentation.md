@@ -39,6 +39,8 @@ Structure :
 {
   "Bookmarks": ["ObjectId"], // Références à la collection `roadmap`
   "RoadmapsStarted": ["ObjectId"], // Références à la collection `roadmap`
+  "RoadmapsCreated": ["ObjectId"], // Références à la collection `roadmap`
+  "StepsCreated": ["ObjectId"], // Références à la collection `step`
   "username": "string",
   "email": "string",
   "password": "string",
@@ -52,7 +54,9 @@ Structure :
 
 Explications des champs :
 
-- `RoadmapsStarted` : Liste des roadmpas où l'utilisateur a une progression.
+- `RoadmapsStarted` : Liste des roadmpaps où l'utilisateur a une progression.
+- `RoadmapsCreated` : Liste des roadmpaps créées par l'utilisateur.
+- `StepsCreated` : Liste des étapes créées par l'utilisateur.
 - `Bookmarks` : Roadmaps misent en signet.
 - `type` : Type d'utilisateur :
  -> `superadmin`

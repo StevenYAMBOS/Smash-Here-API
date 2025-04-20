@@ -153,6 +153,7 @@ func Router() *http.ServeMux {
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
+	mux.HandleFunc("GET /user/roadmaps", AuthMiddleware(getUserRoadmaps))
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
@@ -164,6 +165,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("PUT /steps/{id}/roadmaps", AuthMiddleware(addStepToRoadmaps))
 	mux.HandleFunc("GET /step/{id}", getOneStep)
 	mux.HandleFunc("GET /superadmin/steps", AuthMiddleware(getAllSteps))
+	mux.HandleFunc("GET /user/steps", AuthMiddleware(getUserSteps))
 	mux.HandleFunc("DELETE /step/{id}", AuthMiddleware(deleteOneStep))
 	// Contenus
 	mux.HandleFunc("POST /content", AuthMiddleware(createContent))
@@ -171,9 +173,13 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("PUT /contents/{id}/steps", AuthMiddleware(addContentToSteps))
 	mux.HandleFunc("GET /content/{id}", getOneContent)
 	mux.HandleFunc("GET /superadmin/contents", AuthMiddleware(getAllContents))
+	mux.HandleFunc("GET /user/contents", AuthMiddleware(getUserContents))
 	mux.HandleFunc("DELETE /content/{id}", AuthMiddleware(deleteOneContent))
+	// Tags
+	mux.HandleFunc("POST /superadmin/tag", AuthMiddleware(createTag))
 	// Jeux
 	mux.HandleFunc("POST /superadmin/game", AuthMiddleware(createGame))
+	mux.HandleFunc("PUT /superadmin/tags/{id}/roadmaps", AuthMiddleware(addTagToRoadmaps))
 
 	return mux
 }
@@ -473,6 +479,18 @@ func createSpecialRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ajouter la roadmap à l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$addToSet": bson.M{
+			"RoadmapsCreated": roadmap.ID,
+		},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour de l'utilisateur", http.StatusInternalServerError)
+		return
+	}
+
 	// Réponse de succès
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Roadmap créée avec succès"})
@@ -553,6 +571,18 @@ func createRoadmap(w http.ResponseWriter, r *http.Request) {
 	_, err = collection.InsertOne(ctx, roadmap)
 	if err != nil {
 		http.Error(w, "Erreur lors de l'ajout de la roadmap", http.StatusInternalServerError)
+		return
+	}
+
+	// Ajouter la roadmap à l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$addToSet": bson.M{
+			"RoadmapsCreated": roadmap.ID,
+		},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour de l'utilisateur", http.StatusInternalServerError)
 		return
 	}
 
@@ -790,6 +820,56 @@ func getAllRoadmaps(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(roadmaps)
 }
 
+// Récupérer les roadmaps d'un utilisateur
+func getUserRoadmaps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Charger les roadmaps
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	cursor, err := roadmapCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.RoadmapsCreated}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des roadmaps", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var roadmaps []models.Roadmap
+	if err := cursor.All(ctx, &roadmaps); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(roadmaps)
+}
+
 // Supprimer une roadmap
 func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
@@ -797,26 +877,22 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vérification du token
+	// Auth
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {
-		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
 		return
 	}
-
-	// Supprimer le préfixe "Bearer " si nécessaire
 	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
 		tokenString = tokenString[7:]
 	}
-
-	// Extraire l'email de l'utilisateur depuis le token
 	email, err := extractEmailFromToken(tokenString)
 	if err != nil {
-		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
 		return
 	}
 
-	// Récupérer l'utilisateur en base de données
+	// Récupérer l'utilisateur
 	var user models.User
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -826,40 +902,79 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
 		return
 	}
-
-	// Vérifier le rôle de l'utilisateur
 	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour supprimer une roadmap", http.StatusForbidden)
+		http.Error(w, "Accès refusé", http.StatusForbidden)
 		return
 	}
 
-	// Extraire l'id de la roadmap du chemin
-	roadmapIdFromPath := strings.TrimPrefix(r.URL.Path, "/superadmin/roadmap/")
-	roadmapID, err := primitive.ObjectIDFromHex(roadmapIdFromPath)
+	// ID roadmap
+	roadmapIdStr := strings.TrimPrefix(r.URL.Path, "/superadmin/roadmap/")
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIdStr)
 	if err != nil {
-		log.Printf("ID de la roadmap invalide", roadmapIdFromPath)
-		http.Error(w, "ID de la roadmap invalide", http.StatusBadRequest)
+		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
 		return
 	}
 
-	// Supprimer la roadmap
+	// Suppression de la roadmap
 	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
-	result, err := roadmapCollection.DeleteOne(context.Background(), bson.M{"_id": roadmapID})
+	result, err := roadmapCollection.DeleteOne(ctx, bson.M{"_id": roadmapID})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Erreur lors de la suppression de la roadmap", http.StatusInternalServerError)
 		return
 	}
 
-	// Supprimer la roadmap des jeux
+	// Mise à jour des jeux
 	gameCollection := database.Client.Database("smashheredb").Collection("game")
-	gameCollection.UpdateMany(
-		ctx,
+	_, err = gameCollection.UpdateMany(ctx,
 		bson.M{"Roadmaps": roadmapID},
 		bson.M{"$pull": bson.M{"Roadmaps": roadmapID}},
 	)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour des jeux", http.StatusInternalServerError)
+		return
+	}
 
-	json.NewEncoder(w).Encode(result)
-	w.Write([]byte("Roadmap supprimée avec succès"))
+	// Mise à jour des utilisateurs
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	_, err = userCollection.UpdateMany(ctx,
+		bson.M{"$or": []bson.M{
+			{"RoadmapsCreated": roadmapID},
+			{"RoadmapsStarted": roadmapID},
+		}},
+		bson.M{"$pull": bson.M{
+			"RoadmapsCreated": roadmapID,
+			"RoadmapsStarted": roadmapID,
+		}},
+	)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour des utilisateurs", http.StatusInternalServerError)
+		return
+	}
+
+	// Mise à jour des étapes
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	_, err = stepCollection.UpdateMany(ctx,
+		bson.M{"Roadmaps": roadmapID},
+		bson.M{"$pull": bson.M{"Roadmaps": roadmapID}},
+	)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour des étapes", http.StatusInternalServerError)
+		return
+	}
+
+	// Suppression des progressions
+	progressionCollection := database.Client.Database("smashheredb").Collection("progression")
+	_, err = progressionCollection.DeleteMany(ctx, bson.M{"Roadmap": roadmapID})
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression des progressions", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse OK
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":       "Roadmap supprimée avec succès",
+		"deleted_count": result.DeletedCount,
+	})
 }
 
 // Modifier une roadmap
@@ -1133,6 +1248,56 @@ func getAllSteps(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		steps = append(steps, step)
+	}
+
+	json.NewEncoder(w).Encode(steps)
+}
+
+// Récupérer les étapes d'un utilisateur
+func getUserSteps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Charger les étapes
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	cursor, err := stepCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.StepsCreated}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des étapes", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var steps []models.Step
+	if err := cursor.All(ctx, &steps); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
 	}
 
 	json.NewEncoder(w).Encode(steps)
@@ -1624,6 +1789,56 @@ func getAllContents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(contents)
 }
 
+// Récupérer les contenus d'un utilisateur
+func getUserContents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Charger les contenus
+	contentCollection := database.Client.Database("smashheredb").Collection("content")
+	cursor, err := contentCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.RoadmapsCreated}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des contenus", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var contents []models.Content
+	if err := cursor.All(ctx, &contents); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(contents)
+}
+
 // Modifier un contenu
 func updateOneContent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
@@ -1925,4 +2140,180 @@ func deleteOneContent(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(result)
 	w.Write([]byte("Contenu supprimé avec succès"))
+}
+
+/* ---------- TAGS (superadmin)  ---------- */
+
+// Créer un tag
+func createTag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
+		return
+	}
+
+	// Décoder reçue en JSON
+	var tag models.Tag
+	err = json.NewDecoder(r.Body).Decode(&tag)
+	if err != nil {
+		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Validation des champs obligatoires
+	if tag.Name == nil {
+		http.Error(w, "Le nom est obligatoire", http.StatusBadRequest)
+		return
+	}
+
+	// Initialisation des champs de la tag
+	tag.ID = primitive.NewObjectID()
+	tag.CreatedBy = user.ID
+	tag.UpdatedBy = user.ID
+	tag.CreatedAt = time.Now()
+	tag.UpdatedAt = time.Now()
+
+	// Insérer le tag en base de données
+	collection := database.Client.Database("smashheredb").Collection("tag")
+	_, err = collection.InsertOne(ctx, tag)
+	if err != nil {
+		http.Error(w, "Erreur lors de l'ajout du tag", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse de succès
+	w.WriteHeader(http.StatusCreated)
+}
+
+// Ajouter un tag à plusieurs roadmaps
+func addTagToRoadmaps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Récupérer l'utilisateur
+	var user models.User
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+		http.Error(w, "Accès refusé", http.StatusForbidden)
+		return
+	}
+
+	// Extraire l'ID du tag depuis l'URL
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 || pathParts[4] != "roadmaps" {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+	tagIDStr := pathParts[3]
+	tagID, err := primitive.ObjectIDFromHex(tagIDStr)
+	if err != nil {
+		http.Error(w, "ID de tag invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que le tag existe
+	tagCollection := database.Client.Database("smashheredb").Collection("tag")
+	var tag models.Tag
+	err = tagCollection.FindOne(ctx, bson.M{"_id": tagID}).Decode(&tag)
+	if err != nil {
+		http.Error(w, "Tag introuvable", http.StatusNotFound)
+		return
+	}
+
+	// Récupérer la liste des IDs des roadmaps à modifier
+	var payload struct {
+		RoadmapIDs []string `json:"roadmaps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Body invalide", http.StatusBadRequest)
+		return
+	}
+
+	var objectIDs []primitive.ObjectID
+	for _, idStr := range payload.RoadmapIDs {
+		objID, err := primitive.ObjectIDFromHex(idStr)
+		if err != nil {
+			http.Error(w, "ID de roadmap invalide : "+idStr, http.StatusBadRequest)
+			return
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+
+	// Mise à jour en batch : ajout du tag à chaque roadmap
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	_, err = roadmapCollection.UpdateMany(ctx,
+		bson.M{"_id": bson.M{"$in": objectIDs}},
+		bson.M{"$addToSet": bson.M{"Tags": tagID}},
+	)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour des roadmaps", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Tag ajouté aux roadmaps avec succès",
+		"tag_id":     tagID.Hex(),
+		"roadmaps":   payload.RoadmapIDs,
+		"updated_by": user.Email,
+		"updated_at": time.Now(),
+	})
 }

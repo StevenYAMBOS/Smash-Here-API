@@ -39,6 +39,8 @@ type User struct {
 	UpdatedAt       time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
 	LastLogin       time.Time            `bson:"lastLogin,omitempty" json:"lastLogin"`
 	Bookmarks       []primitive.ObjectID `bson:"Bookmarks,omitempty" json:"Bookmarks"`
+	StepsCreated    []primitive.ObjectID `bson:"StepsCreated,omitempty" json:"StepsCreated"`
+	RoadmapsCreated []primitive.ObjectID `bson:"RoadmapsCreated,omitempty" json:"RoadmapsCreated"`
 	RoadmapsStarted []primitive.ObjectID `bson:"RoadmapsStarted,omitempty" json:"RoadmapsStarted"`
 }
 
