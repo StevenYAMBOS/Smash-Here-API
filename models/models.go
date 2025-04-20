@@ -86,6 +86,7 @@ type Content struct {
 	Title     *string              `bson:"title,omitempty" json:"title"`
 	Type      *string              `bson:"type,omitempty" json:"type"` // "video", "article", "page", "roadmap"
 	Link      *string              `bson:"link,omitempty" json:"link"`
+	Steps     []primitive.ObjectID `bson:"Steps,omitempty" json:"Steps"`
 	Tags      []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
 	CreatedBy primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
 	UpdatedBy primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
