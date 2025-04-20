@@ -153,10 +153,18 @@ func Router() *http.ServeMux {
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
-	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createRoadmap))
+	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
+	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
 	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
 	mux.HandleFunc("DELETE /superadmin/roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
+	// Étapes
+	mux.HandleFunc("POST /step", AuthMiddleware(createStep))
+	mux.HandleFunc("PUT /step/{id}", AuthMiddleware(updateOneStep))
+	mux.HandleFunc("PUT /steps/{id}/roadmaps", AuthMiddleware(addStepToRoadmaps))
+	mux.HandleFunc("GET /step/{id}", getOneStep)
+	mux.HandleFunc("GET /superadmin/steps", AuthMiddleware(getAllSteps))
+	mux.HandleFunc("DELETE /step/{id}", AuthMiddleware(deleteOneStep))
 	// Jeux
 	mux.HandleFunc("POST /superadmin/game", AuthMiddleware(createGame))
 
@@ -379,6 +387,89 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 }
 
 /* ---------- ROADMAPS  ---------- */
+
+// Créer une roadmap (Superadmin uniquement)
+func createSpecialRoadmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
+		return
+	}
+
+	// Décoder la roadmap reçue en JSON
+	var roadmap models.Roadmap
+	err = json.NewDecoder(r.Body).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Validation des champs obligatoires
+	if roadmap.Title == nil || roadmap.Description == nil {
+		http.Error(w, "Le titre et la description sont obligatoires", http.StatusBadRequest)
+		return
+	}
+
+	// Initialisation des champs de la roadmap
+	roadmap.ID = primitive.NewObjectID()
+	roadmap.CreatedBy = user.ID
+	roadmap.UpdatedBy = user.ID
+	roadmap.CreatedAt = time.Now()
+	roadmap.UpdatedAt = time.Now()
+	roadmap.Published = new(bool)
+	roadmap.Premium = new(bool)
+	roadmap.ViewsPerDay = new(int)
+	roadmap.ViewsPerWeek = new(int)
+	roadmap.ViewsPerMonth = new(int)
+	roadmap.TotalViews = new(int)
+
+	// Insérer la roadmap en base de données
+	collection := database.Client.Database("smashheredb").Collection("roadmap")
+	_, err = collection.InsertOne(ctx, roadmap)
+	if err != nil {
+		http.Error(w, "Erreur lors de l'ajout de la roadmap", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse de succès
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Roadmap créée avec succès"})
+}
 
 // Créer une roadmap
 func createRoadmap(w http.ResponseWriter, r *http.Request) {
@@ -863,5 +954,491 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		"message":    "Roadmap modifiée avec succès",
 		"updated_at": time.Now(),
 		"modified":   result.ModifiedCount,
+	})
+}
+
+/* ---------- ÉTAPES  ---------- */
+
+// Créer une étape
+func createStep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une étape", http.StatusForbidden)
+		return
+	}
+
+	// Décoder l'étape reçue en JSON
+	var step models.Step
+	err = json.NewDecoder(r.Body).Decode(&step)
+	if err != nil {
+		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Validation des champs obligatoires
+	if step.Title == nil || step.Description == nil || step.Subtitle == nil {
+		http.Error(w, "Le titre, sous-titre et la description sont obligatoires", http.StatusBadRequest)
+		return
+	}
+
+	// Initialisation des champs de la step
+	step.ID = primitive.NewObjectID()
+	step.CreatedBy = user.ID
+	step.UpdatedBy = user.ID
+	step.CreatedAt = time.Now()
+	step.UpdatedAt = time.Now()
+
+	// Insérer la step en base de données
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	_, err = stepCollection.InsertOne(ctx, step)
+	if err != nil {
+		http.Error(w, "Erreur lors de l'ajout de l'étape", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse de succès
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Étape créée avec succès"})
+}
+
+// Récupérer une étape
+func getOneStep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stepIdFromPath := strings.TrimPrefix(r.URL.Path, "/step/")
+	stepID, err := primitive.ObjectIDFromHex(stepIdFromPath)
+	if err != nil {
+		http.Error(w, "ID de l'étape invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que l'étape existe
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	var step models.Step
+	err = stepCollection.FindOne(ctx, bson.M{"_id": stepID}).Decode(&step)
+	if err != nil {
+		http.Error(w, "La step spécifiée n'existe pas", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(step)
+}
+
+// Récupérer toutes les étapes
+func getAllSteps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour récupérer toutes les étapes", http.StatusForbidden)
+		return
+	}
+
+	// Vérifier que l'étape existe
+	var steps []models.Step
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	cursor, err := stepCollection.Find(context.Background(), bson.D{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var step models.Step
+		if err := cursor.Decode(&step); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		steps = append(steps, step)
+	}
+
+	json.NewEncoder(w).Encode(steps)
+}
+
+// Modifier une étape
+func updateOneStep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+	if user.Type == nil || (*user.Type == "user") {
+		http.Error(w, "Accès refusé", http.StatusForbidden)
+		return
+	}
+
+	// Récupérer l'ID de l'étape
+	stepIDStr := strings.TrimPrefix(r.URL.Path, "/step/")
+	stepID, err := primitive.ObjectIDFromHex(stepIDStr)
+	if err != nil {
+		http.Error(w, "ID de step invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Body à mettre à jour
+	var updatedStep models.Step
+	if err := json.NewDecoder(r.Body).Decode(&updatedStep); err != nil {
+		http.Error(w, "Corps invalide", http.StatusBadRequest)
+		return
+	}
+
+	updateFields := bson.M{}
+	if updatedStep.Title != nil {
+		updateFields["title"] = updatedStep.Title
+	}
+	if updatedStep.Subtitle != nil {
+		updateFields["subtitle"] = updatedStep.Subtitle
+	}
+	if updatedStep.Description != nil {
+		updateFields["description"] = updatedStep.Description
+	}
+	if updatedStep.Roadmaps != nil {
+		updateFields["Roadmaps"] = updatedStep.Roadmaps
+	}
+	if updatedStep.Contents != nil {
+		updateFields["Contents"] = updatedStep.Contents
+	}
+	if updatedStep.Tags != nil {
+		updateFields["Tags"] = updatedStep.Tags
+	}
+	if updatedStep.PreviousSteps != nil {
+		updateFields["PreviousSteps"] = updatedStep.PreviousSteps
+	}
+	if updatedStep.NextSteps != nil {
+		updateFields["NextSteps"] = updatedStep.NextSteps
+	}
+	updateFields["UpdatedAt"] = time.Now()
+	updateFields["UpdatedBy"] = user.ID
+
+	// Si aucun champ modifié
+	if len(updateFields) == 0 {
+		http.Error(w, "Aucun champ valide à modifier", http.StatusBadRequest)
+		return
+	}
+
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	filter := bson.M{"_id": stepID}
+	update := bson.M{"$set": updateFields}
+	result, err := stepCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Aucune étape trouvée", http.StatusNotFound)
+		return
+	}
+
+	// Réponse OK
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Étape modifiée avec succès",
+		"updated_at": time.Now(),
+		"modified":   result.ModifiedCount,
+	})
+}
+
+// Supprimer une étape
+func deleteOneStep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour supprimer une roadmap", http.StatusForbidden)
+		return
+	}
+
+	// Extraire l'id de l'étape du chemin
+	stepIdFromPath := strings.TrimPrefix(r.URL.Path, "/step/")
+	stepID, err := primitive.ObjectIDFromHex(stepIdFromPath)
+	if err != nil {
+		// log.Printf("ID de la step invalide", stepIdFromPath)
+		http.Error(w, "ID de l'étape invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Supprimer l'étape
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	result, err := stepCollection.DeleteOne(context.Background(), bson.M{"_id": stepID})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Supprimer l'étape des roadmaps
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	roadmapCollection.UpdateMany(
+		ctx,
+		bson.M{"Steps": stepID},
+		bson.M{"$pull": bson.M{"Steps": stepID}},
+	)
+
+	json.NewEncoder(w).Encode(result)
+	w.Write([]byte("Étape supprimée avec succès"))
+}
+
+// Ajouter une étape à une liste de roadmaps
+func addStepToRoadmaps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.Type == nil || (*user.Type == "user") {
+		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour ajouter une étape à des roadmaps", http.StatusForbidden)
+		return
+	}
+
+	// Extraire l’ID de roadmap depuis l’URL
+	pathParts := strings.Split(r.URL.Path, "/")
+
+	if len(pathParts) < 4 || pathParts[3] != "roadmaps" {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+
+	stepIDStr := pathParts[2]
+
+	stepID, err := primitive.ObjectIDFromHex(stepIDStr)
+	if err != nil {
+		http.Error(w, "ID de l'étape invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que l'étape existe
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	var step models.Step
+	err = stepCollection.FindOne(ctx, bson.M{"_id": stepID}).Decode(&step)
+	if err != nil {
+		http.Error(w, "L'étape spécifiée n'existe pas", http.StatusNotFound)
+		return
+	}
+
+	// Récupérer les jeux depuis le body
+	var payload struct {
+		RoadmapIDs []string `json:"Roadmaps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Format du body invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Conversion en ObjectID
+	var roadmapObjectIDs []primitive.ObjectID
+	for _, idStr := range payload.RoadmapIDs {
+		roadmapID, err := primitive.ObjectIDFromHex(idStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("ID de jeu invalide : %s", idStr), http.StatusBadRequest)
+			return
+		}
+		roadmapObjectIDs = append(roadmapObjectIDs, roadmapID)
+	}
+
+	// Mise à jour de l'étape
+	result, err := stepCollection.UpdateOne(ctx, bson.M{"_id": stepID}, bson.M{
+		"$set": bson.M{
+			"Roadmaps":  roadmapObjectIDs,
+			"UpdatedAt": time.Now(),
+			"UpdatedBy": user.ID,
+		},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour de l'étape", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Aucune étape mise à jour", http.StatusNotFound)
+		return
+	}
+
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	for _, roadmapID := range roadmapObjectIDs {
+		res, err := roadmapCollection.UpdateOne(ctx, bson.M{"_id": roadmapID}, bson.M{
+			"$addToSet": bson.M{
+				"Steps": stepID,
+			},
+			"$set": bson.M{
+				"UpdatedAt": time.Now(),
+				"UpdatedBy": user.ID,
+			},
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Erreur lors de la mise à jour du jeu : %s", stepID.Hex()), http.StatusInternalServerError)
+			return
+		}
+		if res.MatchedCount == 0 {
+			log.Printf("Aucun jeu trouvé pour l'ID %s\n", stepID.Hex())
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":         "Étape et jeux mis à jour avec succès",
+		"step_id":         stepID.Hex(),
+		"linked_roadmaps": payload.RoadmapIDs,
+		"updated_by":      user.Email,
+		"updated_at":      time.Now(),
 	})
 }

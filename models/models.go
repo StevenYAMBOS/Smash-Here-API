@@ -74,6 +74,8 @@ type Step struct {
 	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
 	PreviousSteps []primitive.ObjectID `bson:"PreviousSteps,omitempty" json:"PreviousSteps"`
 	NextSteps     []primitive.ObjectID `bson:"NextSteps,omitempty" json:"NextSteps"`
+	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
+	UpdatedBy     primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
 	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
 }
