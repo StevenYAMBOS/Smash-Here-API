@@ -130,7 +130,6 @@ Structure :
 {
   "Roadmaps": ["ObjectId"], // Références à la collection `roadmap`
   "Contents": ["ObjectId"], // Références à la collection `content`
-  "Tags": ["ObjectId"], // Références à la collection `tag`
   "PreviousSteps": ["ObjectId"], // Références aux étapes précédentes
   "NextSteps": ["ObjectId"], // Références aux étapes suivantes
   "title": "string",
@@ -145,7 +144,6 @@ Explications des champs :
 
 - `Roadmaps` : Liste des roadmap auxquelles appartient cette étape.
 - `Contents` : Liste des contenus de cette étape.
-- `Tags` : Liste des tags de cette étape.
 - `PreviousSteps` : Liste des étapes précédentes de cette étape. Généralement il n'y aura qu'une étape précédente/parent. Nous préférons utiliser un tableau car une étape peut appartenir à plusieurs roadmaps.
 - `NextSteps` : Liste des étapes suivantes de cette étape. Généralement il n'y aura qu'une étape suivante/enfant. Nous préférons utiliser un tableau car une étape peut appartenir à plusieurs roadmaps.
 - `title` : Titre de l'étape.
@@ -162,7 +160,6 @@ Structure :
 
 ```json
 {
-  "Tags": ["ObjectId"], // Références à la collection `tag`
   "CreatedBy": "ObjectId", // Référence à la collection `user`
   "UpdatedBy": "ObjectId", // Référence à la collection `user`
   "title": "string",
@@ -175,7 +172,6 @@ Structure :
 
 Explications des champs :
 
-- `Tags` : Liste des tags associés à ce contenu.
 - `CreatedBy` : Utilisateur qui a créé ce contenu (le développeur/admin).
 - `UpdatedBy` : Utilisateur qui a mit à jour ce contenu (le développeur/admin).
 - `type` : Type du contenu. Le contenu peut être un(e) :
@@ -258,7 +254,6 @@ Structure :
   "subtitle": "string",
   "description": "string",
   "Roadmaps": ["ObjectId"], // Références à la collection `roadmap`
-  "Tags": ["ObjectId"], // Références à la collection `tag`
   "CreatedBy": "ObjectId", // Référence à la collection `user`
   "UpdatedBy": "ObjectId", // Référence à la collection `user`
   "viewsPerDay": "number",
@@ -273,7 +268,6 @@ Structure :
 Explications des champs :
 
 - `Roadmaps` : Liste des roadmaps appartenant ou liées à ce jeu.
-- `Tags` : Liste des tags relatifs à ce jeu.
 - `CreatedBy` : Utilisateur qui a créé le jeu.
 - `UpdatedBy` : Dernier utilisateur qui a mit à jour les informations du jeu.
 - `title` : Nom du jeu.

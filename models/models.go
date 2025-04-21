@@ -73,7 +73,6 @@ type Step struct {
 	Description   *string              `bson:"description,omitempty" json:"description"`
 	Roadmaps      []primitive.ObjectID `bson:"Roadmaps,omitempty" json:"Roadmaps"`
 	Contents      []primitive.ObjectID `bson:"Contents,omitempty" json:"Contents"`
-	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
 	PreviousSteps []primitive.ObjectID `bson:"PreviousSteps,omitempty" json:"PreviousSteps"`
 	NextSteps     []primitive.ObjectID `bson:"NextSteps,omitempty" json:"NextSteps"`
 	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
@@ -89,7 +88,6 @@ type Content struct {
 	Type      *string              `bson:"type,omitempty" json:"type"` // "video", "article", "page", "roadmap"
 	Link      *string              `bson:"link,omitempty" json:"link"`
 	Steps     []primitive.ObjectID `bson:"Steps,omitempty" json:"Steps"`
-	Tags      []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
 	CreatedBy primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
 	UpdatedBy primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
 	CreatedAt time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
@@ -126,7 +124,6 @@ type Game struct {
 	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
 	UpdatedBy     primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
 	Roadmaps      []primitive.ObjectID `bson:"Roadmaps,omitempty" json:"Roadmaps"`
-	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
 	ViewsPerDay   *int                 `bson:"viewsPerDay,omitempty" json:"viewsPerDay"`
 	ViewsPerWeek  *int                 `bson:"viewsPerWeek,omitempty" json:"viewsPerWeek"`
 	ViewsPerMonth *int                 `bson:"viewsPerMonth,omitempty" json:"viewsPerMonth"`
