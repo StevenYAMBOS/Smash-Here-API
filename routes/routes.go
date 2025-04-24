@@ -157,16 +157,15 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
-	mux.HandleFunc("PUT /superadmin/roadmap/{roadmapID}/remove-tag/{tagID}", AuthMiddleware(deleteTagFromRoadmap))
 	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
 	mux.HandleFunc("PUT /roadmap/{id}/remove-tags", AuthMiddleware(removeTagsFromRoadmap))
+	mux.HandleFunc("DELETE /superadmin/roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
 	// Étapes
 	mux.HandleFunc("POST /step", AuthMiddleware(createStep))
 	mux.HandleFunc("PUT /step/{id}", AuthMiddleware(updateOneStep))
 	mux.HandleFunc("PUT /steps/{id}/roadmaps", AuthMiddleware(addStepToRoadmaps))
 	mux.HandleFunc("GET /step/{id}", getOneStep)
 	mux.HandleFunc("GET /superadmin/steps", AuthMiddleware(getAllSteps))
-	mux.HandleFunc("GET /user/steps", AuthMiddleware(getUserSteps))
 	mux.HandleFunc("DELETE /step/{id}", AuthMiddleware(deleteOneStep))
 	// Contenus
 	mux.HandleFunc("POST /content", AuthMiddleware(createContent))
@@ -404,7 +403,7 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Jeu créé avec succès"})
 }
 
-// Récupérer les roadmaps d'un jeu
+// Récupérer la liste des roadmaps d'un jeu
 func getRoadmapsFromGame(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
@@ -436,15 +435,19 @@ func getRoadmapsFromGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extraire l’ID dU jeu depuis l’URL
+	// Extraire l’ID du jeu depuis l’URL
 	pathParts := strings.Split(r.URL.Path, "/")
-
-	if len(pathParts) < 4 || pathParts[1] != "game" || pathParts[3] != "roadmaps" {
+	if len(pathParts) < 4 || pathParts[1] != "game" {
+		log.Println(pathParts)
 		http.Error(w, "URL invalide", http.StatusBadRequest)
 		return
 	}
-
 	gameIDStr := pathParts[2]
+	gameID, err := primitive.ObjectIDFromHex(gameIDStr)
+	if err != nil {
+		http.Error(w, "ID du jeu invalide", http.StatusBadRequest)
+		return
+	}
 
 	// Vérifier que le jeu existe
 	gameCollection := database.Client.Database("smashheredb").Collection("game")
@@ -1217,7 +1220,7 @@ func removeTagsFromRoadmap(w http.ResponseWriter, r *http.Request) {
 
 	// Lecture du body (liste de tagIDs)
 	var payload struct {
-		TagIDs []string `json:"tagIDs"`
+		TagIDs []string `json:"Tags"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Body invalide", http.StatusBadRequest)
@@ -1249,18 +1252,20 @@ func removeTagsFromRoadmap(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := roadmapCollection.UpdateOne(ctx, bson.M{"_id": roadmapID}, update)
 	if err != nil {
+		log.Println(tagObjectIDs)
+		log.Println(err)
 		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
 		return
 	}
 
 	// Réponse
 	json.NewEncoder(w).Encode(map[string]any{
-		"message":     "Tags supprimés de la roadmap",
-		"roadmap_id":  roadmapID.Hex(),
+		"message":      "Tags supprimés de la roadmap",
+		"roadmap_id":   roadmapID.Hex(),
 		"tags_removed": payload.TagIDs,
-		"updated_by":  user.Email,
-		"updated_at":  time.Now(),
-		"modified":    result.ModifiedCount,
+		"updated_by":   user.Email,
+		"updated_at":   time.Now(),
+		"modified":     result.ModifiedCount,
 	})
 }
 
@@ -1438,56 +1443,6 @@ func getAllSteps(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(steps)
 }
 
-// Récupérer les étapes d'un utilisateur
-func getUserSteps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Authentification
-	tokenString := r.Header.Get("Authorization")
-	if tokenString == "" {
-		http.Error(w, "Token manquant", http.StatusUnauthorized)
-		return
-	}
-	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-		tokenString = tokenString[7:]
-	}
-	email, err := extractEmailFromToken(tokenString)
-	if err != nil {
-		http.Error(w, "Token invalide", http.StatusUnauthorized)
-		return
-	}
-
-	// Récupérer l'utilisateur
-	var user models.User
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
-	if err != nil {
-		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
-		return
-	}
-
-	// Charger les étapes
-	stepCollection := database.Client.Database("smashheredb").Collection("step")
-	cursor, err := stepCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.StepsCreated}})
-	if err != nil {
-		http.Error(w, "Erreur lors de la récupération des étapes", http.StatusInternalServerError)
-		return
-	}
-	defer cursor.Close(ctx)
-
-	var steps []models.Step
-	if err := cursor.All(ctx, &steps); err != nil {
-		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
-		return
-	}
-
-	json.NewEncoder(w).Encode(steps)
-}
-
 // Modifier une étape
 func updateOneStep(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
@@ -1554,9 +1509,6 @@ func updateOneStep(w http.ResponseWriter, r *http.Request) {
 	}
 	if updatedStep.Contents != nil {
 		updateFields["Contents"] = updatedStep.Contents
-	}
-	if updatedStep.Tags != nil {
-		updateFields["Tags"] = updatedStep.Tags
 	}
 	if updatedStep.PreviousSteps != nil {
 		updateFields["PreviousSteps"] = updatedStep.PreviousSteps
@@ -2089,9 +2041,6 @@ func updateOneContent(w http.ResponseWriter, r *http.Request) {
 	if updatedContent.Steps != nil {
 		updateFields["Steps"] = updatedContent.Steps
 	}
-	if updatedContent.Tags != nil {
-		updateFields["Tags"] = updatedContent.Tags
-	}
 	updateFields["UpdatedAt"] = time.Now()
 	updateFields["UpdatedBy"] = user.ID
 
@@ -2403,6 +2352,7 @@ func createTag(w http.ResponseWriter, r *http.Request) {
 
 	// Réponse de succès
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Tag créé avec succès"})
 }
 
 // Ajouter un tag à plusieurs roadmaps
@@ -2576,7 +2526,7 @@ func deleteOneTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extraire l'id du contenu du chemin
-	tagIdFromPath := strings.TrimPrefix(r.URL.Path, "/tag/")
+	tagIdFromPath := strings.TrimPrefix(r.URL.Path, "/superadmin/tag/")
 	tagID, err := primitive.ObjectIDFromHex(tagIdFromPath)
 	if err != nil {
 		http.Error(w, "ID du tag invalide", http.StatusBadRequest)
@@ -2640,7 +2590,7 @@ func updateOneTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Récupérer l'ID du tag
-	tagIDStr := strings.TrimPrefix(r.URL.Path, "/tag/")
+	tagIDStr := strings.TrimPrefix(r.URL.Path, "/superadmin/tag/")
 	tagID, err := primitive.ObjectIDFromHex(tagIDStr)
 	if err != nil {
 		http.Error(w, "ID du tag invalide", http.StatusBadRequest)
@@ -2648,7 +2598,7 @@ func updateOneTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Body à mettre à jour
-	var updatedTag models.Content
+	var updatedTag models.Tag
 	if err := json.NewDecoder(r.Body).Decode(&updatedTag); err != nil {
 		http.Error(w, "Corps invalide", http.StatusBadRequest)
 		return
