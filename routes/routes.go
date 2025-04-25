@@ -150,6 +150,9 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("/", home)
 	mux.HandleFunc("POST /auth/register", register)
 	mux.HandleFunc("POST /auth/login", login)
+	// Utilisateur
+	mux.HandleFunc("PUT /user/bookmarks", addRoadmapToBookmarks)
+	mux.HandleFunc("DELETE /user/bookmarks", removeRoadmapToBookmarks)
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
@@ -317,6 +320,184 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	// Envoi du token au client
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+}
+
+/* ---------- UTILISATEUR  ---------- */
+
+// Ajouter une roadmap aux favoris
+func addRoadmapToBookmarks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var userCollection = database.Client.Database("smashheredb").Collection("user")
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
+		return
+	}
+
+	// Récupérer la roadmap depuis le body
+	var payload struct {
+		RoadmapID string `json:"roadmapId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Format du body invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Transformer l'id en `ObjectId`
+	roadmapID, err := primitive.ObjectIDFromHex(payload.RoadmapID)
+	if err != nil {
+		http.Error(w, "ID invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que la roadmap existe
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+
+	var roadmap models.Roadmap
+	err = roadmapCollection.FindOne(ctx, bson.M{"_id": roadmapID}).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "La roadmap spécifiée n'existe pas", http.StatusNotFound)
+		return
+	}
+
+	// Mise à jour de l'utilisateur
+	result, err := userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$addToSet": bson.M{
+			"Bookmarks": roadmapID,
+		},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors de l'ajout de la roadmap aux favoris", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		log.Println(roadmapID)
+		http.Error(w, "Aucune roadmap ajoutée", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"message": "Roadmap ajoutée aux favoris",
+	})
+}
+
+// Retirer une roadmap des favoris
+func removeRoadmapToBookmarks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	token := r.Header.Get("Authorization")
+	if token == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if strings.HasPrefix(token, "Bearer ") {
+		token = token[7:]
+	}
+
+	email, err := extractEmailFromToken(token)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupération de l'utilisateur
+	var user models.User
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérification du rôle
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
+		return
+	}
+
+	// Lecture du body
+	var payload struct {
+		RoadmapID string `json:"roadmapId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Body invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Transformer l'id en `ObjectId`
+	roadmapID, err := primitive.ObjectIDFromHex(payload.RoadmapID)
+	if err != nil {
+		http.Error(w, "ID invalide", http.StatusBadRequest)
+		return
+
+	}
+
+	// Vérification de l'existence de la roadmap
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	var roadmap models.Roadmap
+	err = roadmapCollection.FindOne(ctx, bson.M{"_id": roadmapID}).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "Roadmap introuvable", http.StatusNotFound)
+		return
+	}
+
+	result, err := userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$pull": bson.M{
+			"Bookmarks": roadmapID,
+		},
+	})
+	if err != nil {
+		fmt.Println(roadmapID)
+		http.Error(w, "Erreur lors de la mise à jour des favoris", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":  "Roadmap retirée des favoris",
+		"modified": result.ModifiedCount,
+	})
 }
 
 /* ---------- JEUX  ---------- */
@@ -1252,8 +1433,6 @@ func removeTagsFromRoadmap(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := roadmapCollection.UpdateOne(ctx, bson.M{"_id": roadmapID}, update)
 	if err != nil {
-		log.Println(tagObjectIDs)
-		log.Println(err)
 		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
 		return
 	}
