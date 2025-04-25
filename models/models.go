@@ -42,6 +42,7 @@ type User struct {
 	StepsCreated    []primitive.ObjectID `bson:"StepsCreated,omitempty" json:"StepsCreated"`
 	RoadmapsCreated []primitive.ObjectID `bson:"RoadmapsCreated,omitempty" json:"RoadmapsCreated"`
 	RoadmapsStarted []primitive.ObjectID `bson:"RoadmapsStarted,omitempty" json:"RoadmapsStarted"`
+	Comments        []primitive.ObjectID `bson:"Comments,omitempty" json:"Comments"`
 }
 
 // Roadmap
@@ -60,6 +61,7 @@ type Roadmap struct {
 	UpdatedBy     primitive.ObjectID   `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
 	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
+	Comments      []primitive.ObjectID `bson:"Comments,omitempty" json:"Comments"`
 	Games         []primitive.ObjectID `bson:"Games,omitempty" json:"Games"`
 	Steps         []primitive.ObjectID `bson:"Steps,omitempty" json:"Steps"`
 	Tags          []primitive.ObjectID `bson:"Tags,omitempty" json:"Tags"`
@@ -131,4 +133,16 @@ type Game struct {
 	Published     *bool                `bson:"published,omitempty" json:"published"`
 	CreatedAt     time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt     time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
+}
+
+// Commentaires liés aux utilisateurs & Roadmaps
+type Comment struct {
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Message   *string            `bson:"Message,omitempty" json:"Message"`
+	Roadmap   primitive.ObjectID `bson:"Roadmap,omitempty" json:"Roadmap"`
+	User      primitive.ObjectID `bson:"User,omitempty" json:"User"`
+	CreatedBy primitive.ObjectID `bson:"CreatedBy,omitempty" json:"CreatedBy"`
+	UpdatedBy primitive.ObjectID `bson:"UpdatedBy,omitempty" json:"UpdatedBy"`
+	CreatedAt time.Time          `bson:"createdAt,omitempty" json:"createdAt"`
+	UpdatedAt time.Time          `bson:"updatedAt,omitempty" json:"updatedAt"`
 }
