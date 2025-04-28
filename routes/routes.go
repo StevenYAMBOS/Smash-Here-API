@@ -152,9 +152,12 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("POST /auth/login", login)
 	// Utilisateur
 	mux.HandleFunc("GET /user/roadmaps", AuthMiddleware(getUserRoadmaps))
+	mux.HandleFunc("GET /user/comments", AuthMiddleware(getUserComments))
 	mux.HandleFunc("POST /roadmap/{id}/comments", AuthMiddleware(addCommentToRoadmap))
 	mux.HandleFunc("PUT /user/bookmarks", AuthMiddleware(addRoadmapToBookmarks))
 	mux.HandleFunc("DELETE /user/bookmarks", AuthMiddleware(removeRoadmapToBookmarks))
+	mux.HandleFunc("DELETE /roadmap/{id}/comment/{id}", AuthMiddleware(deleteCommentToRoadmap))
+	mux.HandleFunc("PUT /roadmap/{id}/comment/{id}", AuthMiddleware(updateCommentToRoadmap))
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
@@ -494,7 +497,6 @@ func removeRoadmapToBookmarks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Réponse
 	json.NewEncoder(w).Encode(map[string]any{
 		"message":  "Roadmap retirée des favoris",
 		"modified": result.ModifiedCount,
@@ -686,6 +688,309 @@ func addCommentToRoadmap(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"message": "Commentaire créé avec succès",
 		"comment": comment,
+	})
+}
+
+// Modifier un commentaire sur une roadmap
+func updateCommentToRoadmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Accès refusé : Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
+		return
+	}
+
+	// Extraire l’ID de roadmap et l’ID de commentaire depuis l’URL
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 || pathParts[1] != "roadmap" || pathParts[3] != "comment" {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+
+	roadmapIDStr := pathParts[2]
+	commentIDStr := pathParts[4]
+
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	if err != nil {
+		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+		return
+	}
+	commentID, err := primitive.ObjectIDFromHex(commentIDStr)
+	if err != nil {
+		http.Error(w, "ID du commentaire invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que la roadmap existe
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	var roadmap models.Roadmap
+	err = roadmapCollection.FindOne(ctx, bson.M{"_id": roadmapID}).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "La roadmap spécifiée n'existe pas", http.StatusNotFound)
+		return
+	}
+
+	// Décoder le commentaire reçu en JSON
+	var updatedComment models.Comment
+	err = json.NewDecoder(r.Body).Decode(&updatedComment)
+	if err != nil {
+		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+		return
+	}
+
+	updateFields := bson.M{}
+	if updatedComment.Message != nil {
+		updateFields["message"] = updatedComment.Message
+	}
+	// Champs automatiques
+	updateFields["UpdatedAt"] = time.Now()
+	updateFields["UpdatedBy"] = user.ID
+
+	// Si aucun champ modifié
+	if len(updateFields) == 0 {
+		http.Error(w, "Aucun champ valide à modifier", http.StatusBadRequest)
+		return
+	}
+
+	// Collection commentaire (`comment`)
+	commentCollection := database.Client.Database("smashheredb").Collection("comment")
+	filter := bson.M{"_id": commentID}
+	update := bson.M{"$set": updateFields}
+	result, err := commentCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Aucun commentaire trouvé", http.StatusNotFound)
+		return
+	}
+
+	// Réponse OK
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Roadmap modifiée avec succès",
+		"updated_at": time.Now(),
+		"modified":   result.ModifiedCount,
+	})
+}
+
+// Récupérer les commentaires d'un utilisateur
+func getUserComments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer les commentaires de l'utilisateur depuis le champ `Comments`
+	commentCollection := database.Client.Database("smashheredb").Collection("cmment")
+	cursor, err := commentCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.Comments}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des commentaires", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var comments []models.Comment
+	if err := cursor.All(ctx, &comments); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(comments)
+}
+
+// Supprimer un commentaire d'une roadmap
+func deleteCommentToRoadmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Vérification du token
+	token := r.Header.Get("Authorization")
+	if token == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if strings.HasPrefix(token, "Bearer ") {
+		token = token[7:]
+	}
+
+	email, err := extractEmailFromToken(token)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupération de l'utilisateur
+	var user models.User
+	var userCollection = database.Client.Database("smashheredb").Collection("user")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérification du rôle
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé, vous devez être connecté.", http.StatusForbidden)
+		return
+	}
+
+	// Extraire l’ID de roadmap depuis l’URL
+	pathParts := strings.Split(r.URL.Path, "/")
+
+	if len(pathParts) < 4 || pathParts[1] != "roadmap" || pathParts[3] != "comments" {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+
+	roadmapIDStr := pathParts[2]
+
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	if err != nil {
+		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérification de l'existence de la roadmap
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	var roadmap models.Roadmap
+	err = roadmapCollection.FindOne(ctx, bson.M{"_id": roadmapID}).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "Roadmap introuvable", http.StatusNotFound)
+		return
+	}
+
+	// Récupérer le commentaire depuis le body
+	var payload struct {
+		CommentID string `json:"commentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Format du body invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Transformer l'id en `ObjectId`
+	commentID, err := primitive.ObjectIDFromHex(payload.CommentID)
+	if err != nil {
+		http.Error(w, "ID invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Récupérer le commentaire à supprimer
+	var comment models.Comment
+	commentCollection := database.Client.Database("smashheredb").Collection("comment")
+	err = commentCollection.FindOne(ctx, bson.M{"_id": commentID}).Decode(&comment)
+	if err != nil {
+		http.Error(w, "Commentaire introuvable", http.StatusNotFound)
+		return
+	}
+
+	// Supprimer le commentaire principal
+	_, err = commentCollection.DeleteOne(ctx, bson.M{"_id": commentID})
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression du commentaire", http.StatusInternalServerError)
+		return
+	}
+
+	// Supprimer aussi ses éventuelles réponses (cascade sur Responses)
+	if len(comment.Responses) > 0 {
+		_, err = commentCollection.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": comment.Responses}})
+		if err != nil {
+			http.Error(w, "Erreur lors de la suppression des réponses du commentaire", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Supprimer le commentaire de la roadmap
+	_, err = roadmapCollection.UpdateOne(ctx, bson.M{"_id": roadmapID}, bson.M{
+		"$pull": bson.M{
+			"Comments": commentID,
+		},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression du commentaire de la roadmap", http.StatusInternalServerError)
+		return
+	}
+
+	// Supprimer le commentaire de l'utilisateur
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$pull": bson.M{
+			"Comments": commentID,
+		},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression du commentaire de l'utilisateur", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse de succès
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]any{
+		"message": "Commentaire supprimé avec succès",
 	})
 }
 
