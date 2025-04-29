@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -154,13 +156,14 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /user/roadmaps", AuthMiddleware(getUserRoadmaps))
 	mux.HandleFunc("GET /user/comments", AuthMiddleware(getUserComments))
 	mux.HandleFunc("POST /roadmap/{id}/comments", AuthMiddleware(addCommentToRoadmap))
+	mux.HandleFunc("GET /roadmap/{id}/comments", AuthMiddleware(getRoadmapComments))
 	mux.HandleFunc("PUT /user/bookmarks", AuthMiddleware(addRoadmapToBookmarks))
 	mux.HandleFunc("DELETE /user/bookmarks", AuthMiddleware(removeRoadmapToBookmarks))
 	mux.HandleFunc("DELETE /roadmap/{id}/comment/{id}", AuthMiddleware(deleteCommentToRoadmap))
 	mux.HandleFunc("PUT /roadmap/{id}/comment/{id}", AuthMiddleware(updateCommentToRoadmap))
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
-	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
+	mux.HandleFunc("GET /superadmin/roadmSaps", AuthMiddleware(getAllRoadmaps))
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
@@ -840,14 +843,44 @@ func getUserComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Récupérer les commentaires de l'utilisateur depuis le champ `Comments`
-	commentCollection := database.Client.Database("smashheredb").Collection("cmment")
-	cursor, err := commentCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.Comments}})
-	if err != nil {
-		http.Error(w, "Erreur lors de la récupération des commentaires", http.StatusInternalServerError)
+	// Vérifier le rôle de l'utilisateur
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
 		return
 	}
-	defer cursor.Close(ctx)
+
+	// Lire les paramètres de pagination depuis l'URL
+	limitParam := r.URL.Query().Get("limit")
+	skipParam := r.URL.Query().Get("skip")
+
+	limit := int64(10)
+	skip := int64(0)
+
+	if limitParam != "" {
+		if parsed, err := strconv.ParseInt(limitParam, 10, 64); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if skipParam != "" {
+		if parsed, err := strconv.ParseInt(skipParam, 10, 64); err == nil && parsed >= 0 {
+			skip = parsed
+		}
+	}
+
+	// Récupérer les commentaires de l'utilisateur depuis le champ `Comments`
+	commentCollection := database.Client.Database("smashheredb").Collection("comment")
+	totalCount, err := commentCollection.CountDocuments(ctx, bson.M{"CreatedBy": user.ID})
+	if err != nil {
+		http.Error(w, "Erreur lors du comptage des commentaires", http.StatusInternalServerError)
+		return
+	}
+
+	cursor, err := commentCollection.Find(ctx, bson.M{
+		"CreatedBy": user.ID,
+	}, options.Find().
+		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
+		SetLimit(limit).
+		SetSkip(skip))
 
 	var comments []models.Comment
 	if err := cursor.All(ctx, &comments); err != nil {
@@ -855,7 +888,15 @@ func getUserComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(comments)
+	hasMore := (skip + limit) < totalCount
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"comments":   comments,
+		"totalCount": totalCount,
+		"limit":      limit,
+		"skip":       skip,
+		"hasMore":    hasMore,
+	})
 }
 
 // Supprimer un commentaire d'une roadmap
@@ -1570,6 +1611,117 @@ func getAllRoadmaps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(roadmaps)
+}
+
+// Récupérer les commentaires d'une roadmap
+func getRoadmapComments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && strings.HasPrefix(tokenString, "Bearer ") {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
+		return
+	}
+
+	// Extraire l'ID de la roadmap depuis l'URL
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 4 || pathParts[1] != "roadmap" || pathParts[3] != "comments" {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+	roadmapIDStr := pathParts[2]
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	if err != nil {
+		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que la roadmap existe
+	var roadmap models.Roadmap
+	err = database.Client.Database("smashheredb").Collection("roadmap").FindOne(ctx, bson.M{"_id": roadmapID}).Decode(&roadmap)
+	if err != nil {
+		http.Error(w, "Roadmap introuvable", http.StatusNotFound)
+		return
+	}
+
+	// Lire les paramètres de pagination
+	limit := int64(10)
+	skip := int64(0)
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.ParseInt(l, 10, 64); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if s := r.URL.Query().Get("skip"); s != "" {
+		if parsed, err := strconv.ParseInt(s, 10, 64); err == nil && parsed >= 0 {
+			skip = parsed
+		}
+	}
+
+	// Compter les commentaires de cette roadmap
+	commentCollection := database.Client.Database("smashheredb").Collection("comment")
+	totalCount, err := commentCollection.CountDocuments(ctx, bson.M{"Roadmap": roadmapID})
+	if err != nil {
+		http.Error(w, "Erreur lors du comptage des commentaires", http.StatusInternalServerError)
+		return
+	}
+
+	// Récupérer les commentaires
+	cursor, err := commentCollection.Find(ctx,
+		bson.M{"Roadmap": roadmapID},
+		options.Find().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}}).
+			SetLimit(limit).
+			SetSkip(skip),
+	)
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des commentaires", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var comments []models.Comment
+	if err := cursor.All(ctx, &comments); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+
+	hasMore := (skip + limit) < totalCount
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"comments":   comments,
+		"totalCount": totalCount,
+		"limit":      limit,
+		"skip":       skip,
+		"hasMore":    hasMore,
+	})
 }
 
 // Supprimer une roadmap
