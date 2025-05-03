@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +145,72 @@ func extractEmailFromToken(tokenString string) (string, error) {
 	return "", fmt.Errorf("Token invalide ou email manquant")
 }
 
+/*
+// Config AWS
+type AwsConfigClient struct {
+	config aws.Config
+	region string
+}
+
+// Bucket AWS
+type AwsS3Client struct {
+	config aws.Config
+	bucket string
+	s3     *s3.Client
+}
+
+func NewAwsConfigClient(region string) (AwsConfigClient, error) {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatalf("Erreur lors du chargement des variables d'environnement: %s", err)
+	}
+
+	AWS_ACCESS_KEY := os.Getenv("AWS_ACCESS_KEY")
+	AWS_SECRETE_KEY := os.Getenv("AWS_SECRETE_KEY")
+	if AWS_ACCESS_KEY == "" && AWS_SECRETE_KEY == "" {
+		log.Fatalf("AWS_ACCESS_KEY ou AWS_ACCESS_KEY ne sont pas défini dans le fichier .env")
+	}
+
+	prov := credentials.NewStaticCredentialsProvider(AWS_ACCESS_KEY, AWS_SECRETE_KEY, "")
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(region),
+		config.WithCredentialsProvider(prov),
+	)
+
+	return AwsConfigClient{
+		config: cfg,
+	}, err
+}
+
+func NewAwsS3Client(cfg AwsConfigClient, bucket string) (*AwsS3Client, error) {
+	client := s3.NewFromConfig(cfg.config)
+	return &AwsS3Client{
+		config: cfg.config,
+		bucket: bucket,
+		s3:     client,
+	}, nil
+}
+
+func (cli *AwsS3Client) UploadObject(path string) (*manager.UploadOutput, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	client := s3.NewFromConfig(cli.config)
+	uploader := manager.NewUploader(client)
+	result, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(cli.bucket),
+		Key:    aws.String(filepath.Base(path)),
+		Body:   file,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+*/
+
 /* ==================== ROUTEUR ==================== */
 
 func Router() *http.ServeMux {
@@ -159,8 +227,8 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /roadmap/{id}/comments", AuthMiddleware(getRoadmapComments))
 	mux.HandleFunc("PUT /user/bookmarks", AuthMiddleware(addRoadmapToBookmarks))
 	mux.HandleFunc("DELETE /user/bookmarks", AuthMiddleware(removeRoadmapToBookmarks))
-	mux.HandleFunc("DELETE /roadmap/{id}/comment/{id}", AuthMiddleware(deleteCommentToRoadmap))
-	mux.HandleFunc("PUT /roadmap/{id}/comment/{id}", AuthMiddleware(updateCommentToRoadmap))
+	mux.HandleFunc("DELETE /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(deleteCommentToRoadmap))
+	mux.HandleFunc("PUT /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(updateCommentToRoadmap))
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /superadmin/roadmSaps", AuthMiddleware(getAllRoadmaps))
@@ -215,49 +283,93 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var user models.User
-	err := json.NewDecoder(r.Body).Decode(&user)
+	// Lire les données multipart (image + champs)
+	err := r.ParseMultipartForm(10 << 20)
 	if err != nil {
-		http.Error(w, "Erreur de décodage des données", http.StatusBadRequest)
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
 		return
 	}
 
-	// Vérifications de base
-	if user.Username == nil || user.Email == nil || user.Password == nil {
+	// Champs texte
+	username := r.FormValue("username")
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+
+	if username == "" || email == "" || password == "" {
 		http.Error(w, "Tous les champs sont obligatoires", http.StatusBadRequest)
 		return
 	}
 
-	if len(*user.Password) < 6 {
+	if len(password) < 6 {
 		http.Error(w, "Le mot de passe doit contenir au moins 6 caractères", http.StatusBadRequest)
 		return
 	}
 
-	// Hacher le mot de passe
-	hashedPassword := HashPassword(*user.Password)
-	user.Password = &hashedPassword
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("profilePicture")
+	if err != nil {
+		http.Error(w, "Image manquante ou invalide", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
 
-	// Initialiser d'autres champs
-	user.ID = primitive.NewObjectID()
-	user.CreatedAt = time.Now()
-	user.UpdatedAt = time.Now()
-	user.LastLogin = time.Now()
-
-	if database.Client == nil {
-		http.Error(w, "Erreur interne: Base de données non initialisée", http.StatusInternalServerError)
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Erreur de lecture de l'image", http.StatusInternalServerError)
 		return
 	}
 
+	// Nom du fichier S3
+	ext := filepath.Ext(fileHeader.Filename)
+	objectKey := fmt.Sprintf("user/%s%s", username, ext)
+
+	// Upload sur S3
+	s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+	if err != nil {
+		http.Error(w, "Erreur d'upload sur S3", http.StatusInternalServerError)
+		return
+	}
+
+	// URL de l'image
+	imageURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+		os.Getenv("AWS_S3_BUCKET_NAME"),
+		os.Getenv("AWS_S3_REGION"),
+		objectKey,
+	)
+
+	// Hash du mot de passe
+	hashed := HashPassword(password)
+
+	// Construction de l'utilisateur
+	user := models.User{
+		ID:             primitive.NewObjectID(),
+		Username:       &username,
+		Email:          &email,
+		Password:       &hashed,
+		ProfilePicture: &imageURL,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		LastLogin:      time.Now(),
+	}
+
+	// Insertion dans MongoDB
 	collection := database.Client.Database("smashheredb").Collection("user")
 	_, err = collection.InsertOne(r.Context(), user)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Erreur lors de la création du compte : %v", err), http.StatusInternalServerError)
+		http.Error(w, "Erreur lors de l'enregistrement", http.StatusInternalServerError)
 		return
 	}
 
+	// Réponse
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, "Utilisateur créé avec succès")
-	fmt.Println("Utilisateur créé avec succès : ", user)
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":        "Utilisateur créé avec succès",
+		"profilePicture": imageURL,
+	})
 }
 
 var c *context.Context

@@ -20,6 +20,7 @@ func main() {
 	}
 
 	database.InitDatabase()
+	database.InitS3Client()
 	PORT := os.Getenv("PORT")
 	router := routes.Router()
 
