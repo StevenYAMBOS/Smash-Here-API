@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -145,71 +146,22 @@ func extractEmailFromToken(tokenString string) (string, error) {
 	return "", fmt.Errorf("Token invalide ou email manquant")
 }
 
-/*
-// Config AWS
-type AwsConfigClient struct {
-	config aws.Config
-	region string
-}
-
-// Bucket AWS
-type AwsS3Client struct {
-	config aws.Config
-	bucket string
-	s3     *s3.Client
-}
-
-func NewAwsConfigClient(region string) (AwsConfigClient, error) {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatalf("Erreur lors du chargement des variables d'environnement: %s", err)
+func parseObjectIDArray(input string) ([]primitive.ObjectID, error) {
+	ids := strings.Split(input, ",")
+	var objectIDs []primitive.ObjectID
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return nil, err
+		}
+		objectIDs = append(objectIDs, oid)
 	}
-
-	AWS_ACCESS_KEY := os.Getenv("AWS_ACCESS_KEY")
-	AWS_SECRETE_KEY := os.Getenv("AWS_SECRETE_KEY")
-	if AWS_ACCESS_KEY == "" && AWS_SECRETE_KEY == "" {
-		log.Fatalf("AWS_ACCESS_KEY ou AWS_ACCESS_KEY ne sont pas défini dans le fichier .env")
-	}
-
-	prov := credentials.NewStaticCredentialsProvider(AWS_ACCESS_KEY, AWS_SECRETE_KEY, "")
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(region),
-		config.WithCredentialsProvider(prov),
-	)
-
-	return AwsConfigClient{
-		config: cfg,
-	}, err
+	return objectIDs, nil
 }
-
-func NewAwsS3Client(cfg AwsConfigClient, bucket string) (*AwsS3Client, error) {
-	client := s3.NewFromConfig(cfg.config)
-	return &AwsS3Client{
-		config: cfg.config,
-		bucket: bucket,
-		s3:     client,
-	}, nil
-}
-
-func (cli *AwsS3Client) UploadObject(path string) (*manager.UploadOutput, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	client := s3.NewFromConfig(cli.config)
-	uploader := manager.NewUploader(client)
-	result, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(cli.bucket),
-		Key:    aws.String(filepath.Base(path)),
-		Body:   file,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-*/
 
 /* ==================== ROUTEUR ==================== */
 
@@ -233,13 +185,15 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("PUT /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(updateCommentToRoadmap))
 	// Roadmap
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
-	mux.HandleFunc("GET /superadmin/roadmSaps", AuthMiddleware(getAllRoadmaps))
+	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
 	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
 	mux.HandleFunc("PUT /roadmap/{id}/remove-tags", AuthMiddleware(removeTagsFromRoadmap))
 	mux.HandleFunc("DELETE /superadmin/roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
+	mux.HandleFunc("DELETE /roadmap/{id}/step/{stepId}", AuthMiddleware(removeStepFromRoadmap))
+
 	// Étapes
 	mux.HandleFunc("POST /step", AuthMiddleware(createStep))
 	mux.HandleFunc("PUT /step/{id}", AuthMiddleware(updateOneStep))
@@ -302,6 +256,18 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pseudo pas plus long que 30 caractères
+	if len(username) > 30 {
+		http.Error(w, "Le pseudo est trop long", http.StatusBadRequest)
+	}
+
+	// Vérifie que le pseudo contient au moins une lettre
+	matched, _ := regexp.MatchString(`[A-Za-z]`, username)
+	if !matched {
+		http.Error(w, "Le pseudo doit contenir au moins une lettre", http.StatusBadRequest)
+		return
+	}
+
 	if len(password) < 6 {
 		http.Error(w, "Le mot de passe doit contenir au moins 6 caractères", http.StatusBadRequest)
 		return
@@ -358,9 +324,21 @@ func register(w http.ResponseWriter, r *http.Request) {
 		LastLogin:      time.Now(),
 	}
 
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+
+	// Vérifie que le pseudo n'est pas déjà utilisé
+	count, err := userCollection.CountDocuments(ctx, bson.M{"username": username})
+	if err != nil {
+		http.Error(w, "Erreur lors de la vérification du pseudo", http.StatusInternalServerError)
+		return
+	}
+	if count > 0 {
+		http.Error(w, "Pseudo déjà utilisé", http.StatusBadRequest)
+		return
+	}
+
 	// Insertion dans MongoDB
-	collection := database.Client.Database("smashheredb").Collection("user")
-	_, err = collection.InsertOne(r.Context(), user)
+	_, err = userCollection.InsertOne(r.Context(), user)
 	if err != nil {
 		http.Error(w, "Erreur lors de l'enregistrement", http.StatusInternalServerError)
 		return
@@ -1505,36 +1483,105 @@ func createSpecialRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Décoder la roadmap reçue en JSON
-	var roadmap models.Roadmap
-	err = json.NewDecoder(r.Body).Decode(&roadmap)
-	if err != nil {
-		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+	// Lire les données multipart (image + champs)
+	error := r.ParseMultipartForm(10 << 20)
+	if error != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
+	// Champs texte
+	title := r.FormValue("title")
+	description := r.FormValue("description")
+	subTitle := r.FormValue("subTitle")
+
+	// Titre pas plus long que 30 caractères
+	if len(title) > 120 {
+		http.Error(w, "Le titre est trop long", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifie que le titre contient au moins une lettre
+	matched, _ := regexp.MatchString(`[A-Za-z]`, title)
+	if !matched {
+		http.Error(w, "Le titre doit contenir au moins une lettre", http.StatusBadRequest)
 		return
 	}
 
 	// Validation des champs obligatoires
-	if roadmap.Title == nil || roadmap.Description == nil {
+	if title == "" || description == "" {
 		http.Error(w, "Le titre et la description sont obligatoires", http.StatusBadRequest)
 		return
 	}
 
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("cover")
+	if err != nil {
+		http.Error(w, "Image de couverture manquante ou invalide", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Erreur de lecture de l'image", http.StatusInternalServerError)
+		return
+	}
+
+	// Nom du fichier S3
+	ext := filepath.Ext(fileHeader.Filename)
+	objectKey := fmt.Sprintf("roadmap/%s%s", title, ext)
+
+	// Upload sur S3
+	s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+
+	err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+	if err != nil {
+		http.Error(w, "Erreur d'upload sur S3", http.StatusInternalServerError)
+		return
+	}
+
+	// URL de l'image
+	coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+		os.Getenv("AWS_S3_BUCKET_NAME"),
+		os.Getenv("AWS_S3_REGION"),
+		objectKey,
+	)
+
 	// Initialisation des champs de la roadmap
-	roadmap.ID = primitive.NewObjectID()
-	roadmap.CreatedBy = user.ID
-	roadmap.UpdatedBy = user.ID
-	roadmap.CreatedAt = time.Now()
-	roadmap.UpdatedAt = time.Now()
-	roadmap.Published = new(bool)
-	roadmap.Premium = new(bool)
-	roadmap.ViewsPerDay = new(int)
-	roadmap.ViewsPerWeek = new(int)
-	roadmap.ViewsPerMonth = new(int)
-	roadmap.TotalViews = new(int)
+	roadmapFields := models.Roadmap{
+		ID:            primitive.NewObjectID(),
+		CreatedBy:     user.ID,
+		UpdatedBy:     user.ID,
+		Title:         &title,
+		Description:   &description,
+		SubTitle:      &subTitle,
+		Cover:         &coverURL,
+		Published:     new(bool),
+		Premium:       new(bool),
+		ViewsPerDay:   new(int),
+		ViewsPerWeek:  new(int),
+		ViewsPerMonth: new(int),
+		TotalViews:    new(int),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+
+	// Vérifie que le titre de roadmap n'est pas déjà utilisé
+	count, err := roadmapCollection.CountDocuments(ctx, bson.M{"title": title})
+	if err != nil {
+		http.Error(w, "Erreur lors de la vérification du titre", http.StatusInternalServerError)
+		return
+	}
+	if count > 0 {
+		http.Error(w, "Une roadmap avec ce nom existe déjà", http.StatusBadRequest)
+		return
+	}
 
 	// Insérer la roadmap en base de données
-	collection := database.Client.Database("smashheredb").Collection("roadmap")
-	_, err = collection.InsertOne(ctx, roadmap)
+	_, err = roadmapCollection.InsertOne(ctx, roadmapFields)
 	if err != nil {
 		http.Error(w, "Erreur lors de l'ajout de la roadmap", http.StatusInternalServerError)
 		return
@@ -1544,7 +1591,7 @@ func createSpecialRoadmap(w http.ResponseWriter, r *http.Request) {
 	userCollection := database.Client.Database("smashheredb").Collection("user")
 	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
 		"$addToSet": bson.M{
-			"RoadmapsCreated": roadmap.ID,
+			"RoadmapsCreated": roadmapFields.ID,
 		},
 	})
 	if err != nil {
@@ -1600,36 +1647,105 @@ func createRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Décoder la roadmap reçue en JSON
-	var roadmap models.Roadmap
-	err = json.NewDecoder(r.Body).Decode(&roadmap)
-	if err != nil {
-		http.Error(w, "Format de données invalide", http.StatusBadRequest)
+	// Lire les données multipart (image + champs)
+	error := r.ParseMultipartForm(10 << 20)
+	if error != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
+	// Champs texte
+	title := r.FormValue("title")
+	description := r.FormValue("description")
+	subTitle := r.FormValue("subTitle")
+
+	// Titre pas plus long que 30 caractères
+	if len(title) > 120 {
+		http.Error(w, "Le titre est trop long", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifie que le titre contient au moins une lettre
+	matched, _ := regexp.MatchString(`[A-Za-z]`, title)
+	if !matched {
+		http.Error(w, "Le titre doit contenir au moins une lettre", http.StatusBadRequest)
 		return
 	}
 
 	// Validation des champs obligatoires
-	if roadmap.Title == nil || roadmap.Description == nil {
-		http.Error(w, "Le titre et la description sont obligatoires", http.StatusBadRequest)
+	if title == "" || description == "" || subTitle == "" {
+		http.Error(w, "Le titre, sous-titre et la description sont obligatoires", http.StatusBadRequest)
 		return
 	}
 
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("cover")
+	if err != nil {
+		http.Error(w, "Image de couverture manquante ou invalide", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Erreur de lecture de l'image", http.StatusInternalServerError)
+		return
+	}
+
+	// Nom du fichier S3
+	ext := filepath.Ext(fileHeader.Filename)
+	objectKey := fmt.Sprintf("roadmap/%s%s", title, ext)
+
+	// Upload sur S3
+	s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+
+	err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+	if err != nil {
+		http.Error(w, "Erreur d'upload sur S3", http.StatusInternalServerError)
+		return
+	}
+
+	// URL de l'image
+	coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+		os.Getenv("AWS_S3_BUCKET_NAME"),
+		os.Getenv("AWS_S3_REGION"),
+		objectKey,
+	)
+
 	// Initialisation des champs de la roadmap
-	roadmap.ID = primitive.NewObjectID()
-	roadmap.CreatedBy = user.ID
-	roadmap.UpdatedBy = user.ID
-	roadmap.CreatedAt = time.Now()
-	roadmap.UpdatedAt = time.Now()
-	roadmap.Published = new(bool)
-	roadmap.Premium = new(bool)
-	roadmap.ViewsPerDay = new(int)
-	roadmap.ViewsPerWeek = new(int)
-	roadmap.ViewsPerMonth = new(int)
-	roadmap.TotalViews = new(int)
+	roadmapFields := models.Roadmap{
+		ID:            primitive.NewObjectID(),
+		CreatedBy:     user.ID,
+		UpdatedBy:     user.ID,
+		Title:         &title,
+		Description:   &description,
+		SubTitle:      &subTitle,
+		Cover:         &coverURL,
+		Published:     new(bool),
+		Premium:       new(bool),
+		ViewsPerDay:   new(int),
+		ViewsPerWeek:  new(int),
+		ViewsPerMonth: new(int),
+		TotalViews:    new(int),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+
+	// Vérifie que le titre de roadmap n'est pas déjà utilisé
+	count, err := roadmapCollection.CountDocuments(ctx, bson.M{"title": title})
+	if err != nil {
+		http.Error(w, "Erreur lors de la vérification du titre", http.StatusInternalServerError)
+		return
+	}
+	if count > 0 {
+		http.Error(w, "Une roadmap avec ce nom existe déjà", http.StatusBadRequest)
+		return
+	}
 
 	// Insérer la roadmap en base de données
-	collection := database.Client.Database("smashheredb").Collection("roadmap")
-	_, err = collection.InsertOne(ctx, roadmap)
+	_, err = roadmapCollection.InsertOne(ctx, roadmapFields)
 	if err != nil {
 		http.Error(w, "Erreur lors de l'ajout de la roadmap", http.StatusInternalServerError)
 		return
@@ -1639,7 +1755,7 @@ func createRoadmap(w http.ResponseWriter, r *http.Request) {
 	userCollection := database.Client.Database("smashheredb").Collection("user")
 	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
 		"$addToSet": bson.M{
-			"RoadmapsCreated": roadmap.ID,
+			"RoadmapsCreated": roadmapFields.ID,
 		},
 	})
 	if err != nil {
@@ -2108,6 +2224,13 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lire les données multipart (image + champs)
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
 	// Authentification
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {
@@ -2132,6 +2255,7 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
 		return
 	}
+
 	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé", http.StatusForbidden)
 		return
@@ -2147,32 +2271,82 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 
 	// Body à mettre à jour
 	var updatedRoadmap models.Roadmap
-	if err := json.NewDecoder(r.Body).Decode(&updatedRoadmap); err != nil {
-		http.Error(w, "Corps invalide", http.StatusBadRequest)
-		return
-	}
+	title := r.FormValue("title")
+	description := r.FormValue("description")
+	subTitle := r.FormValue("subTitle")
+	published := r.FormValue("published")
+	premium := r.FormValue("premium")
+	Steps := r.FormValue("Steps")
+	Games := r.FormValue("Games")
+	Tags := r.FormValue("Tags")
 
 	// Construction du $set dynamique
 	updateFields := bson.M{}
-	if updatedRoadmap.Title != nil {
-		updateFields["title"] = updatedRoadmap.Title
+
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("cover")
+	if err == nil {
+		defer file.Close()
+		imageData, _ := io.ReadAll(file)
+		ext := filepath.Ext(fileHeader.Filename)
+		safeTitle := title
+		if safeTitle == "" {
+			safeTitle = "cover"
+		}
+		objectKey := fmt.Sprintf("roadmap/%s%s", *updatedRoadmap.Title, ext)
+
+		s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+		err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+		if err == nil {
+			coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+				os.Getenv("AWS_S3_BUCKET_NAME"),
+				os.Getenv("AWS_S3_REGION"),
+				objectKey,
+			)
+			updateFields["cover"] = coverURL
+		}
 	}
-	if updatedRoadmap.SubTitle != nil {
-		updateFields["subTitle"] = updatedRoadmap.SubTitle
+
+	if title != "" {
+		updateFields["title"] = title
 	}
-	if updatedRoadmap.Description != nil {
-		updateFields["description"] = updatedRoadmap.Description
+	if description != "" {
+		updateFields["description"] = description
 	}
-	if updatedRoadmap.Published != nil {
-		updateFields["published"] = updatedRoadmap.Published
+	if subTitle != "" {
+		updateFields["subTitle"] = subTitle
 	}
-	if updatedRoadmap.Premium != nil {
-		updateFields["premium"] = updatedRoadmap.Premium
+	if published != "" {
+		updateFields["published"] = published
 	}
-	if updatedRoadmap.Tags != nil {
-		updateFields["Tags"] = updatedRoadmap.Tags
+	if premium != "" {
+		updateFields["premium"] = premium
 	}
-	// Champs automatiques
+	if Games != "" {
+		gameIDs, err := parseObjectIDArray(Games)
+		if err != nil {
+			http.Error(w, "Liste de jeux invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["Games"] = gameIDs
+	}
+	if Steps != "" {
+		stepIDs, err := parseObjectIDArray(Steps)
+		if err != nil {
+			http.Error(w, "Liste d'étapes invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["Steps"] = stepIDs
+	}
+	if Tags != "" {
+		tagIDs, err := parseObjectIDArray(Tags)
+		if err != nil {
+			http.Error(w, "Liste de tags invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["Tags"] = tagIDs
+	}
+
 	updateFields["UpdatedAt"] = time.Now()
 	updateFields["UpdatedBy"] = user.ID
 
@@ -2182,9 +2356,9 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
 	filter := bson.M{"_id": roadmapID}
 	update := bson.M{"$set": updateFields}
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
 	result, err := roadmapCollection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
@@ -2311,6 +2485,114 @@ func removeTagsFromRoadmap(w http.ResponseWriter, r *http.Request) {
 		"updated_by":   user.Email,
 		"updated_at":   time.Now(),
 		"modified":     result.ModifiedCount,
+	})
+}
+
+// Supprimer une étape d'une roadmap
+func removeStepFromRoadmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	token := r.Header.Get("Authorization")
+	if token == "" || len(token) < 8 || !strings.HasPrefix(token, "Bearer ") {
+		http.Error(w, "Token manquant ou invalide", http.StatusUnauthorized)
+		return
+	}
+	email, err := extractEmailFromToken(token[7:])
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupération de l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérification du rôle
+	if user.Type == nil || (*user.Type != "superadmin" && *user.Type != "coach") {
+		http.Error(w, "Accès refusé", http.StatusForbidden)
+		return
+	}
+
+	// Récupérer roadmapId et stepId
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+	roadmapID, err := primitive.ObjectIDFromHex(parts[2])
+	stepID, err2 := primitive.ObjectIDFromHex(parts[4])
+	if err != nil || err2 != nil {
+		http.Error(w, "ID invalide", http.StatusBadRequest)
+		return
+	}
+
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+
+	// Supprimer les références à cette étape dans PreviousSteps et NextSteps d'autres étapes
+	_, err = stepCollection.UpdateMany(ctx, bson.M{
+		"PreviousSteps": stepID,
+	}, bson.M{
+		"$pull": bson.M{"PreviousSteps": stepID},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors du nettoyage des PreviousSteps", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = stepCollection.UpdateMany(ctx, bson.M{
+		"NextSteps": stepID,
+	}, bson.M{
+		"$pull": bson.M{"NextSteps": stepID},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors du nettoyage des NextSteps", http.StatusInternalServerError)
+		return
+	}
+
+	// Mise à jour de la roadmap (retrait de l'étape)
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	update := bson.M{
+		"$pull": bson.M{"Steps": stepID},
+		"$set":  bson.M{"UpdatedAt": time.Now()},
+	}
+	result, err := roadmapCollection.UpdateOne(ctx, bson.M{"_id": roadmapID}, update)
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression de l'étape", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Roadmap non trouvée", http.StatusNotFound)
+		return
+	}
+
+	// Supprimer cette étape des contenus (champ Steps)
+	contentCollection := database.Client.Database("smashheredb").Collection("content")
+	_, err = contentCollection.UpdateMany(ctx, bson.M{
+		"Steps": stepID,
+	}, bson.M{
+		"$pull": bson.M{"Steps": stepID},
+	})
+	if err != nil {
+		http.Error(w, "Erreur lors du nettoyage des contenus", http.StatusInternalServerError)
+		return
+	}
+
+	// Réponse
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]any{
+		"message": "Étape retirée avec succès de la roadmap",
+		"step_id": stepID.Hex(),
 	})
 }
 
@@ -2544,7 +2826,7 @@ func updateOneStep(w http.ResponseWriter, r *http.Request) {
 		updateFields["title"] = updatedStep.Title
 	}
 	if updatedStep.Subtitle != nil {
-		updateFields["subtitle"] = updatedStep.Subtitle
+		updateFields["subTitle"] = updatedStep.Subtitle
 	}
 	if updatedStep.Description != nil {
 		updateFields["description"] = updatedStep.Description
@@ -2581,6 +2863,22 @@ func updateOneStep(w http.ResponseWriter, r *http.Request) {
 	if result.MatchedCount == 0 {
 		http.Error(w, "Aucune étape trouvée", http.StatusNotFound)
 		return
+	}
+
+	// Synchroniser les relations inverses (PreviousSteps <=> NextSteps)
+	if updatedStep.PreviousSteps != nil {
+		for _, prevID := range updatedStep.PreviousSteps {
+			_, _ = stepCollection.UpdateOne(ctx, bson.M{"_id": prevID}, bson.M{
+				"$addToSet": bson.M{"NextSteps": stepID},
+			})
+		}
+	}
+	if updatedStep.NextSteps != nil {
+		for _, nextID := range updatedStep.NextSteps {
+			_, _ = stepCollection.UpdateOne(ctx, bson.M{"_id": nextID}, bson.M{
+				"$addToSet": bson.M{"PreviousSteps": stepID},
+			})
+		}
 	}
 
 	// Réponse OK

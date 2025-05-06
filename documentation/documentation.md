@@ -1,6 +1,6 @@
 # Documentation
 
-- Mise à jour le : **15/04/2025**
+- Mise à jour le : **06/05/2025**
 - Par : **Steven YAMBOS**
 
 ## Description
@@ -41,6 +41,7 @@ Structure :
   "RoadmapsStarted": ["ObjectId"], // Références à la collection `roadmap`
   "RoadmapsCreated": ["ObjectId"], // Références à la collection `roadmap`
   "StepsCreated": ["ObjectId"], // Références à la collection `step`
+  "Comments": ["ObjectId"], // Références à la collection `comment`
   "username": "string",
   "email": "string",
   "password": "string",
@@ -58,6 +59,7 @@ Explications des champs :
 - `RoadmapsCreated` : Liste des roadmpaps créées par l'utilisateur.
 - `StepsCreated` : Liste des étapes créées par l'utilisateur.
 - `Bookmarks` : Roadmaps misent en signet.
+- `Comments` : Liste des commentaires de l'utilisateur.
 - `type` : Type d'utilisateur :
  -> `superadmin`
  -> `coach`
@@ -83,6 +85,7 @@ Structure :
   "Games": ["ObjectId"], // Références à la collection `game`
   "Steps": ["ObjectId"], // Références à la collection `step`
   "Tags": ["ObjectId"], // Références à la collection `tag`
+  "Comments": ["ObjectId"], // Références à la collection `comment`
   "CreatedBy": "ObjectId", // Référence à la collection `user`
   "UpdatedBy": "ObjectId", // Référence à la collection `user`
   "title": "string",
@@ -104,6 +107,7 @@ Explication des champs :
 - `Games` : Liste des jeux auxquels appartient la roadmap.
 - `Steps` : Liste des étapes de la roadmap.
 - `Tags` : Liste des tags de la roadmap.
+- `Tags` : Liste des commentaires de la roadmap.
 - `CreatedBy` : Utilisateur qui a créé le document.
 - `UpdatedBy` : Dernier utilisateur qui a mit à jour les informations du jeu.
 - `title` : Nom de la roadmap.
@@ -132,6 +136,8 @@ Structure :
   "Contents": ["ObjectId"], // Références à la collection `content`
   "PreviousSteps": ["ObjectId"], // Références aux étapes précédentes
   "NextSteps": ["ObjectId"], // Références aux étapes suivantes
+  "CreatedBy": "ObjectId", // Référence à la collection 'user
+  "UpdatedBy": "ObjectId", // Référence à la collection 'user
   "title": "string",
   "subtitle": "string",
   "description": "string",
@@ -146,6 +152,8 @@ Explications des champs :
 - `Contents` : Liste des contenus de cette étape.
 - `PreviousSteps` : Liste des étapes précédentes de cette étape. Généralement il n'y aura qu'une étape précédente/parent. Nous préférons utiliser un tableau car une étape peut appartenir à plusieurs roadmaps.
 - `NextSteps` : Liste des étapes suivantes de cette étape. Généralement il n'y aura qu'une étape suivante/enfant. Nous préférons utiliser un tableau car une étape peut appartenir à plusieurs roadmaps.
+- `CreatedBy` : Utilisateur qui a créé le document.
+- `UpdatedBy` : Dernier utilisateur qui a mit à jour les informations de l'étape.
 - `title` : Titre de l'étape.
 - `subtitle` : Sous-titre de l'étape.
 - `description` : Description de l'étape.
@@ -160,6 +168,7 @@ Structure :
 
 ```json
 {
+  "Steps": ["ObjectId"], // Référence à la collection `step`
   "CreatedBy": "ObjectId", // Référence à la collection `user`
   "UpdatedBy": "ObjectId", // Référence à la collection `user`
   "title": "string",
@@ -172,6 +181,7 @@ Structure :
 
 Explications des champs :
 
+- `Steps` : Liste des étapes liées au contenu.
 - `CreatedBy` : Utilisateur qui a créé ce contenu (le développeur/admin).
 - `UpdatedBy` : Utilisateur qui a mit à jour ce contenu (le développeur/admin).
 - `type` : Type du contenu. Le contenu peut être un(e) :
@@ -278,6 +288,38 @@ Explications des champs :
 - `viewsPerMonths` : Nombre de vues par mois de la page du jeu.
 - `totalViews` : Nombre de vues total.
 - `viewsPerMonths` : Nombre de vues par mois de la page du jeu.
+- `createdAt` : Date de création du document.
+- `updatedAt` : Date de mise à jour du document.
+
+---
+
+#### Collection `comment`
+
+Les commentaires sont ajoutés par des utilisateurs pour des roadmaps.
+
+Structure :
+
+```json
+{
+  "Responses": ["ObjectId"], // Référence à la collection `comment`
+  "Roadmap": "ObjectId", // Référence à la collection `roadmap`
+  "User": "ObjectId", // Référence à la collection `user`
+  "CreatedBy": "ObjectId", // Référence à la collection `user`
+  "UpdatedBy": "ObjectId", // Référence à la collection `user`
+  "message": "string",
+  "createdAt": "timestamp",
+  "updatedAt": "timestamp"
+}
+```
+
+Explications des champs :
+
+- `Responses` : Liste des réponses (autres commentaires) à ce commentaire.
+- `Roadmap` : Roadmap associée à ce commentaire.
+- `User` : Utilisateur associé à ce commentaire.
+- `CreatedBy` : Utilisateur qui a créé le jeu.
+- `UpdatedBy` : Dernier utilisateur qui a mit à jour les informations du jeu.
+- `message` : Contenu du message.
 - `createdAt` : Date de création du document.
 - `updatedAt` : Date de mise à jour du document.
 

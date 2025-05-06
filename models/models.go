@@ -51,6 +51,7 @@ type Roadmap struct {
 	Title         *string              `bson:"title,omitempty" json:"title"`
 	SubTitle      *string              `bson:"subTitle,omitempty" json:"subTitle"`
 	Description   *string              `bson:"description,omitempty" json:"description"`
+	Cover         *string              `bson:"cover,omitempty" json:"cover"`
 	Published     *bool                `bson:"published,omitempty" json:"published"`
 	Premium       *bool                `bson:"premium,omitempty" json:"premium"`
 	ViewsPerDay   *int                 `bson:"viewsPerDay,omitempty" json:"viewsPerDay"`
@@ -71,7 +72,7 @@ type Roadmap struct {
 type Step struct {
 	ID            primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
 	Title         *string              `bson:"title,omitempty" json:"title"`
-	Subtitle      *string              `bson:"subtitle,omitempty" json:"subtitle"`
+	Subtitle      *string              `bson:"subTitle,omitempty" json:"subTitle"`
 	Description   *string              `bson:"description,omitempty" json:"description"`
 	Roadmaps      []primitive.ObjectID `bson:"Roadmaps,omitempty" json:"Roadmaps"`
 	Contents      []primitive.ObjectID `bson:"Contents,omitempty" json:"Contents"`
@@ -120,7 +121,7 @@ type Tag struct {
 type Game struct {
 	ID            primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
 	Title         *string              `bson:"title,omitempty" json:"title"`
-	Subtitle      *string              `bson:"subtitle,omitempty" json:"subtitle"`
+	Subtitle      *string              `bson:"subTitle,omitempty" json:"subTitle"`
 	Description   *string              `bson:"description,omitempty" json:"description"`
 	Cover         *string              `bson:"cover,omitempty" json:"cover"`
 	CreatedBy     primitive.ObjectID   `bson:"CreatedBy,omitempty" json:"CreatedBy"`
