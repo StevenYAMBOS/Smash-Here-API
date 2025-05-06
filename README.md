@@ -6,21 +6,21 @@
 
 ## Description
 
-SMASH HERE est une plateforme e-sport spécialisée dans les jeux de combat, destinée à centraliser et structurer l’apprentissage et la progression des joueurs. Elle repose sur des roadmaps **interactives** et personnalisées, conçues pour guider les joueurs à travers des étapes clés de progression, adaptées à leur niveau (débutant, intermédiaire, avancé) et à leurs besoins spécifiques (jeu, personnage, stratégie).
+**SMASH HERE** est une **plateforme e-sport** spécialisée dans les **jeux de combat**, destinée à **centraliser** et **structurer** l’apprentissage et la **progression** des joueurs. Elle repose sur des roadmaps **interactives** et **personnalisées**, conçues pour guider les joueurs à travers des étapes clés de progression, adaptées à leur niveau (débutant, intermédiaire, avancé) et à leurs besoins spécifiques (jeu, personnage, stratégie).
 Les roadmaps sont des guides qui décrive les étapes à suivre pour arriver à un objectif. La plateforme disposera de plusieurs type de roadmap en fonction des jeux, des personnages ou encore des niveaux des joueurs.
 
 La plateforme cible un large éventail d’utilisateurs, incluant les joueurs passionnés (amateurs et professionnels) et les coachs e-sportifs. Ces roadmaps sont conçues pour :
 
-- Centraliser l’information aujourd’hui dispersée sur différentes plateformes (YouTube, X, Reddit, Discord, Twitch).
-- Simplifier l’apprentissage grâce à des parcours interactifs et évolutifs.
-- Offrir des outils de suivi personnalisés pour optimiser les performances.
-- Fédérer une communauté active, tout en proposant des solutions adaptées aux besoins de chaque utilisateur.
+* **Centraliser l’information** aujourd’hui dispersée sur différentes plateformes (YouTube, X, Reddit, Discord, Twitch).
+* **Simplifier l’apprentissage** grâce à des parcours interactifs et évolutifs.
+* Offrir des **outils de suivi** personnalisés pour optimiser les performances.
+* Fédérer une communauté active, tout en proposant des solutions adaptées aux besoins de chaque utilisateur.
 
 Missions principales :
 
-- Centralisation des ressources : Regrouper et valider les informations pour éviter la dispersion.
-- Apprentissage structuré : Proposer des parcours pédagogiques clairs et interactifs.
-- Personnalisation de l’expérience utilisateur : Offrir des outils de suivi et d’ajustement des roadmaps.
+- **Centralisation des ressources :** Regrouper et valider les informations pour éviter la dispersion.
+- **Apprentissage structuré :** Proposer des parcours pédagogiques clairs et interactifs.
+- **Personnalisation de l’expérience utilisateur :** Offrir des outils de suivi et d’ajustement des roadmaps.
 - Engagement communautaire : Créer un espace collaboratif pour les joueurs et les coachs.
 
 ## Technologies utilisées
