@@ -33,7 +33,7 @@ type User struct {
 	Username        *string              `bson:"username,omitempty" json:"username"`
 	Email           *string              `bson:"email,omitempty" json:"email"`
 	Password        *string              `bson:"password,omitempty" json:"password"`
-	ProfilePicture  *string              `bson:"profileImage,omitempty" json:"profileImage"`
+	ProfilePicture  *string              `bson:"profilePicture,omitempty" json:"profilePicture"`
 	Type            *string              `bson:"type,omitempty" json:"type"`
 	CreatedAt       time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt       time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`

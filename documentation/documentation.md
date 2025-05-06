@@ -45,7 +45,7 @@ Structure :
   "email": "string",
   "password": "string",
   "type": "string", // "superadmin", "coach", "user"
-  "profileImage": "string", // URL vers l'image de profil
+  "profilePicture": "string", // URL vers l'image de profil
   "createdAt": "timestamp",
   "updatedAt": "timestamp",
   "lastLogin": "timestamp"
@@ -64,7 +64,7 @@ Explications des champs :
  -> `user`
 - `username` : Pseudo.
 - `email` : Adresse Email.
-- `profileImage` : Image de profil.
+- `profilePicture` : Image de profil.
 - `password` : Mot de passe.
 - `createdAt` : Date de création du document.
 - `updatedAt` : Date de mise à jour du document.

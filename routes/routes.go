@@ -226,6 +226,8 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("POST /roadmap/{id}/comments", AuthMiddleware(addCommentToRoadmap))
 	mux.HandleFunc("GET /roadmap/{id}/comments", AuthMiddleware(getRoadmapComments))
 	mux.HandleFunc("PUT /user/bookmarks", AuthMiddleware(addRoadmapToBookmarks))
+	mux.HandleFunc("PUT /user/profile", AuthMiddleware(updateProfile))
+	mux.HandleFunc("GET /user/profile", AuthMiddleware(getProfile))
 	mux.HandleFunc("DELETE /user/bookmarks", AuthMiddleware(removeRoadmapToBookmarks))
 	mux.HandleFunc("DELETE /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(deleteCommentToRoadmap))
 	mux.HandleFunc("PUT /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(updateCommentToRoadmap))
@@ -442,6 +444,160 @@ func login(w http.ResponseWriter, r *http.Request) {
 }
 
 /* ---------- UTILISATEUR  ---------- */
+
+// Récupérer les informations du profil
+func getProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	err = userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur connecté
+	cursor, err := userCollection.Find(ctx, bson.M{"_id": user.ID})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération de l'utilisateur", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	json.NewEncoder(w).Encode(user)
+}
+
+// Modifier le profil
+func updateProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lire les données multipart (image + champs)
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
+	// Vérification du token
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Accès refusé : Token manquant", http.StatusUnauthorized)
+		return
+	}
+
+	// Supprimer le préfixe "Bearer " si nécessaire
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// Extraire l'email de l'utilisateur depuis le token
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur en base de données
+	var userCollection = database.Client.Database("smashheredb").Collection("user")
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Vérifier le rôle de l'utilisateur
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
+		return
+	}
+
+	// Body à mettre à jour
+	username := r.FormValue("username")
+
+	// Construction du $set dynamique
+	updateFields := bson.M{}
+
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("profilePicture")
+	if err == nil {
+		defer file.Close()
+		imageData, _ := io.ReadAll(file)
+		ext := filepath.Ext(fileHeader.Filename)
+		objectKey := fmt.Sprintf("user/%s%s", *user.Username, ext)
+
+		s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+		err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+		if err == nil {
+			imageURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+				os.Getenv("AWS_S3_BUCKET_NAME"),
+				os.Getenv("AWS_S3_REGION"),
+				objectKey,
+			)
+			updateFields["profilePicture"] = imageURL
+		}
+	}
+
+	if username != "" {
+		updateFields["username"] = username
+	}
+	updateFields["UpdatedAt"] = time.Now()
+	updateFields["UpdatedBy"] = user.ID
+
+	// Si aucun champ modifié
+	if len(updateFields) == 0 {
+		http.Error(w, "Aucun champ valide à modifier", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"_id": user.ID}
+	update := bson.M{"$set": updateFields}
+	result, err := userCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Aucune utilisateur trouvé", http.StatusNotFound)
+		return
+	}
+
+	// Réponse OK
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Utilisateur modifié avec succès",
+		"updated_at": time.Now(),
+		"modified":   result.ModifiedCount,
+	})
+}
 
 // Ajouter une roadmap aux favoris
 func addRoadmapToBookmarks(w http.ResponseWriter, r *http.Request) {
