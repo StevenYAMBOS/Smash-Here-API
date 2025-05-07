@@ -522,6 +522,20 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 	// Body à mettre à jour
 	username := r.FormValue("username")
 
+	// Pseudo pas plus long que 30 caractères
+	if len(username) > 30 {
+		http.Error(w, `{"error":"Le pseudo est trop long (max 30 caractères)"}`, http.StatusBadRequest)
+		return
+
+	}
+
+	// Vérifie que le pseudo contient au moins une lettre
+	matched, _ := regexp.MatchString(`[A-Za-z]`, username)
+	if !matched {
+		http.Error(w, `{"error":"Le pseudo doit contenir au moins une lettre"}`, http.StatusBadRequest)
+		return
+	}
+
 	// Construction du $set dynamique
 	updateFields := bson.M{}
 
@@ -557,6 +571,19 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Vérifie que le pseudo n'est pas déjà utilisé
+	if username != *user.Username {
+		count, err := userCollection.CountDocuments(ctx, bson.M{"username": username})
+		if err != nil {
+			http.Error(w, `{"error":"Erreur lors de la vérification du pseudo"}`, http.StatusInternalServerError)
+			return
+		}
+		if count > 0 {
+			http.Error(w, `{"error":"Pseudo déjà utilisé"}`, http.StatusBadRequest)
+			return
+		}
+	}
+
 	filter := bson.M{"_id": user.ID}
 	update := bson.M{"$set": updateFields}
 	result, err := userCollection.UpdateOne(ctx, filter, update)
@@ -569,7 +596,6 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Réponse OK
 	json.NewEncoder(w).Encode(map[string]any{
 		"message":    "Utilisateur modifié avec succès",
 		"updated_at": time.Now(),
@@ -2115,7 +2141,6 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auth
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {
 		http.Error(w, "Token manquant", http.StatusUnauthorized)
@@ -2150,14 +2175,6 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 	roadmapID, err := primitive.ObjectIDFromHex(roadmapIdStr)
 	if err != nil {
 		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
-		return
-	}
-
-	// Suppression de la roadmap
-	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
-	result, err := roadmapCollection.DeleteOne(ctx, bson.M{"_id": roadmapID})
-	if err != nil {
-		http.Error(w, "Erreur lors de la suppression de la roadmap", http.StatusInternalServerError)
 		return
 	}
 
@@ -2210,7 +2227,53 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Réponse OK
+	/*  Suppression des commentaires de la roadmap */
+	commentCollection := database.Client.Database("smashheredb").Collection("comment")
+
+	// Étape 1 : récupérer les commentaires associés à la roadmap
+	cursor, err := commentCollection.Find(ctx, bson.M{"Roadmap": roadmapID})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des commentaires", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var comments []models.Comment
+	if err := cursor.All(ctx, &comments); err != nil {
+		http.Error(w, "Erreur lors du parsing des commentaires", http.StatusInternalServerError)
+		return
+	}
+
+	var commentIDs []primitive.ObjectID
+	for _, c := range comments {
+		commentIDs = append(commentIDs, c.ID)
+	}
+
+	// Étape 2 : suppression des commentaires dans les utilisateurs
+	_, err = userCollection.UpdateMany(ctx,
+		bson.M{"Comments": bson.M{"$in": commentIDs}},
+		bson.M{"$pull": bson.M{"Comments": bson.M{"$in": commentIDs}}},
+	)
+	if err != nil {
+		http.Error(w, "Erreur lors du nettoyage des commentaires dans les utilisateurs", http.StatusInternalServerError)
+		return
+	}
+
+	// Étape 3 : suppression des commentaires dans la collection comment
+	_, err = commentCollection.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": commentIDs}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression des commentaires", http.StatusInternalServerError)
+		return
+	}
+
+	// Suppression de la roadmap
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	result, err := roadmapCollection.DeleteOne(ctx, bson.M{"_id": roadmapID})
+	if err != nil {
+		http.Error(w, "Erreur lors de la suppression de la roadmap", http.StatusInternalServerError)
+		return
+	}
+
 	json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Roadmap supprimée avec succès",
 		"deleted_count": result.DeletedCount,
