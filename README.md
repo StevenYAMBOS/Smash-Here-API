@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="assets/flame.webp" alt="Smash Here logo" width="400">
+  <img src="https://github.com/StevenYAMBOS/Smash-Here-API/blob/dev/assets/flame.webp" alt="Smash Here logo" width="400">
 </p>
 
 # Smash here API
