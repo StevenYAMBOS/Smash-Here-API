@@ -222,8 +222,9 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("DELETE /superadmin/tag/{id}", AuthMiddleware(deleteOneTag))
 	// Jeux
 	mux.HandleFunc("GET /game/{id}", getGame)
+	mux.HandleFunc("GET /games", getAllGames)
 	mux.HandleFunc("POST /superadmin/game", AuthMiddleware(createGame))
-	mux.HandleFunc("PUT /superadmin/game", AuthMiddleware(updateOneGame))
+	mux.HandleFunc("PUT /superadmin/game/{id}", AuthMiddleware(updateOneGame))
 	mux.HandleFunc("GET /game/{id}/roadmaps", AuthMiddleware(getRoadmapsFromGame))
 	mux.HandleFunc("DELETE /game/{id}/roadmaps", AuthMiddleware(removeRoadmapsFromGame))
 
@@ -1598,6 +1599,38 @@ func getGame(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(game)
+}
+
+// Récupérer tous les jeux
+func getAllGames(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Vérifier que les jeux existent
+	var games []models.Game
+	gameCollection := database.Client.Database("smashheredb").Collection("game")
+	cursor, err := gameCollection.Find(ctx, bson.D{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var game models.Game
+		if err := cursor.Decode(&game); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		games = append(games, game)
+	}
+
+	json.NewEncoder(w).Encode(games)
 }
 
 // Modifier un jeu
