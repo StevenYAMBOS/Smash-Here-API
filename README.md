@@ -51,9 +51,9 @@ go run cmd/main.go
 
 ## Liens utiles
 
-- [Dépôt Front-End]()
-- [Documentation]()
-- [Smash Here Website]()
+- [Dépôt Front-End](https://github.com/StevenYAMBOS/Smash-Here-App)
+- [Documentation](https://github.com/StevenYAMBOS/Smash-Here-API/wiki)
+- [Smash Here Website]() (à venir)
 
 ## Autheur
 
