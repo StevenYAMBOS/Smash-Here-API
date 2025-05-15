@@ -24,7 +24,14 @@ func main() {
 	database.InitS3Client()
 	PORT := os.Getenv("PORT")
 	router := routes.Router()
-	handler := cors.Default().Handler(router)
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173"}, // autorise ton front-end local
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowCredentials: true,
+	})
+
+	handler := c.Handler(router)
 
 	fmt.Println("Application lancée : http://localhost" + PORT)
 	http.ListenAndServe(PORT, handler)

@@ -225,7 +225,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /games", getAllGames)
 	mux.HandleFunc("POST /superadmin/game", AuthMiddleware(createGame))
 	mux.HandleFunc("PUT /superadmin/game/{id}", AuthMiddleware(updateOneGame))
-	mux.HandleFunc("GET /game/{id}/roadmaps", AuthMiddleware(getRoadmapsFromGame))
+	mux.HandleFunc("GET /game/{id}/roadmaps", getRoadmapsFromGame)
 	mux.HandleFunc("DELETE /game/{id}/roadmaps", AuthMiddleware(removeRoadmapsFromGame))
 
 	return mux
@@ -1768,30 +1768,8 @@ func getRoadmapsFromGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authentification
-	tokenString := r.Header.Get("Authorization")
-	if tokenString == "" {
-		http.Error(w, "Token manquant", http.StatusUnauthorized)
-		return
-	}
-	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-		tokenString = tokenString[7:]
-	}
-	email, err := extractEmailFromToken(tokenString)
-	if err != nil {
-		http.Error(w, "Token invalide", http.StatusUnauthorized)
-		return
-	}
-
-	// Récupérer l'utilisateur
-	var user models.User
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
-	if err != nil {
-		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
-		return
-	}
 
 	// Extraire l’ID du jeu depuis l’URL
 	pathParts := strings.Split(r.URL.Path, "/")
@@ -2454,13 +2432,26 @@ func getRoadmapSteps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Récupération de l'ID de la roadmap
-	roadmapIDStr := strings.TrimPrefix(r.URL.Path, "/roadmap/")
-	roadmapIDStr = strings.TrimSuffix(roadmapIDStr, "/steps") // retire le suffixe pour extraire l'ID
-	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
-	if err != nil {
-		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 4 || pathParts[1] != "roadmap" {
+		log.Println(pathParts)
+		http.Error(w, "URL invalide", http.StatusBadRequest)
 		return
 	}
+	roadmapIDStr := pathParts[2]
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	if err != nil {
+		http.Error(w, "ID de la roadmap invalide", http.StatusBadRequest)
+		return
+	}
+
+	// roadmapIDStr := strings.TrimPrefix(r.URL.Path, "/roadmap/")
+	// roadmapIDStr = strings.TrimSuffix(roadmapIDStr, "/steps") // retire le suffixe pour extraire l'ID
+	// roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	// if err != nil {
+	// 	http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+	// 	return
+	// }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -2481,17 +2472,29 @@ func getRoadmapSteps(w http.ResponseWriter, r *http.Request) {
 
 	// Récupérer les étapes une par une en respectant l’ordre
 	stepCollection := database.Client.Database("smashheredb").Collection("step")
-	var orderedSteps []models.Step
-
-	for stepID := range roadmap.Steps {
-		var step models.Step
-		err := stepCollection.FindOne(ctx, bson.M{"_id": stepID}).Decode(&step)
-		if err == nil {
-			orderedSteps = append(orderedSteps, step)
-		}
+	cursor, err := stepCollection.Find(ctx, bson.M{"_id": bson.M{"$in": roadmap.Steps}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des etapes", http.StatusInternalServerError)
+		return
 	}
+	defer cursor.Close(ctx)
 
-	json.NewEncoder(w).Encode(orderedSteps)
+	var steps []models.Step
+	if err := cursor.All(ctx, &steps); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+	// var orderedSteps []models.Step
+
+	// for stepID := range roadmap.Steps {
+	// 	var step models.Step
+	// 	err := stepCollection.FindOne(ctx, bson.M{"_id": stepID}).Decode(&step)
+	// 	if err == nil {
+	// 		orderedSteps = append(orderedSteps, step)
+	// 	}
+	// }
+
+	json.NewEncoder(w).Encode(steps)
 }
 
 // Récupérer toutes les roadmaps
@@ -3629,6 +3632,7 @@ func updateOneStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.MatchedCount == 0 {
+		fmt.Println(err, updateFields)
 		http.Error(w, "Aucune étape trouvée", http.StatusNotFound)
 		return
 	}
