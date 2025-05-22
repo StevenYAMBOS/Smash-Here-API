@@ -14,6 +14,10 @@ func UserRoutes(r chi.Router) {
 	r.Route("/user", func(r chi.Router) {
 		r.Use(auth.AuthMiddleware)
 		r.Get("/profile", GetProfileHandler)
+		r.Put("/profile", UpdateProfileHandler)
+		r.Get("/user/{id}", GetUserByIdHandler)
+		r.Get("/user/roadmaps", GetUserRoadmapsHandler)
+		r.Get("/user/roadmaps", GetUserRoadmapsHandler)
 	})
 }
 

@@ -26,6 +26,7 @@ import (
 type UserService struct {
 	bucketName string
 	region     string
+	dbName     string
 }
 
 // NewUserService instancie le service avec la config S3.
@@ -37,6 +38,7 @@ func NewUserService() *UserService {
 	return &UserService{
 		bucketName: cfg.AWSS3BucketName,
 		region:     cfg.AWSS3Region,
+		dbName:     cfg.DBName,
 	}
 }
 
@@ -128,4 +130,117 @@ func (s *UserService) GetProfile(ctx context.Context, email string) (*models.Use
 		return nil, err
 	}
 	return &user, nil
+}
+
+// Renvoie la liste des roadmaps créées par l'utilisateur.
+func (s *UserService) GetUserRoadmaps(ctx context.Context, email string) ([]models.Roadmap, error) {
+	// 1. Récupérer l'utilisateur
+	userColl := database.Client.Database(s.dbName).Collection("user")
+	var u models.User
+	if err := userColl.FindOne(ctx, bson.M{"email": email}).Decode(&u); err != nil {
+		return nil, fmt.Errorf("utilisateur non trouvé : %w", err)
+	}
+
+	// 2. Récupérer les roadmaps
+	roadmapColl := database.Client.Database(s.dbName).Collection("roadmap")
+	cursor, err := roadmapColl.Find(ctx, bson.M{"_id": bson.M{"$in": u.RoadmapsCreated}})
+	if err != nil {
+		return nil, fmt.Errorf("erreur lors de la récupération des roadmaps : %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var roadmaps []models.Roadmap
+	if err := cursor.All(ctx, &roadmaps); err != nil {
+		return nil, fmt.Errorf("erreur de parsing des données : %w", err)
+	}
+	return roadmaps, nil
+}
+
+// Met à jour le profil d'un utilisateur
+func (s *UserService) UpdateProfile(
+	ctx context.Context,
+	email, newUsername string,
+	file multipart.File, header *multipart.FileHeader,
+) (*models.User, error) {
+	// récupérer l'utilisateur
+	coll := database.Client.Database(s.dbName).Collection("user")
+	var user models.User
+	if err := coll.FindOne(ctx, bson.M{"email": email}).Decode(&user); err != nil {
+		return nil, fmt.Errorf("utilisateur non trouvé")
+	}
+
+	update := bson.M{"UpdatedAt": time.Now(), "UpdatedBy": user.ID}
+	// pseudo
+	if newUsername != "" && newUsername != *user.Username {
+		if len(newUsername) > 30 {
+			return nil, fmt.Errorf("le pseudo est trop long (max 30 caractères)")
+		}
+		if ok, _ := regexp.MatchString(`[A-Za-z]`, newUsername); !ok {
+			return nil, fmt.Errorf("le pseudo doit contenir au moins une lettre")
+		}
+		count, err := coll.CountDocuments(ctx, bson.M{"username": newUsername})
+		if err != nil {
+			return nil, fmt.Errorf("erreur vérification pseudo")
+		}
+		if count > 0 {
+			return nil, fmt.Errorf("pseudo déjà utilisé")
+		}
+		update["username"] = newUsername
+	}
+
+	// image
+	if file != nil && header != nil {
+		data, err := io.ReadAll(file)
+		if err != nil {
+			return nil, fmt.Errorf("lecture image impossible")
+		}
+		ext := filepath.Ext(header.Filename)
+		key := fmt.Sprintf("user/%s%s", *user.Username, ext)
+		uploader := database.BucketBasics{S3Client: database.S3Client}
+		if err := uploader.UploadLargeObject(ctx, s.bucketName, key, data); err != nil {
+			return nil, fmt.Errorf("upload S3 échoué : %w", err)
+		}
+		url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucketName, s.region, key)
+		update["profilePicture"] = url
+	}
+
+	res, err := coll.UpdateOne(ctx,
+		bson.M{"_id": user.ID},
+		bson.M{"$set": update},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("erreur update en base")
+	}
+	if res.MatchedCount == 0 {
+		return nil, fmt.Errorf("aucun utilisateur modifié")
+	}
+
+	if err := coll.FindOne(ctx, bson.M{"_id": user.ID}).Decode(&user); err != nil {
+		return nil, fmt.Errorf("lecture post-update échouée")
+	}
+	return &user, nil
+}
+
+// Récupérer les informations d'un utilisateur
+func (s *UserService) GetUserByID(ctx context.Context, currentEmail string, targetID primitive.ObjectID) (*models.User, error) {
+	coll := database.Client.Database(s.dbName).Collection("user")
+
+	// Récupérer l'utilisateur courant et vérifier son rôle
+	var current models.User
+	if err := coll.FindOne(ctx, bson.M{"email": currentEmail}).Decode(&current); err != nil {
+		return nil, fmt.Errorf("accès refusé")
+	}
+	if current.Type == nil || (*current.Type != "coach" && *current.Type != "superadmin") {
+		return nil, fmt.Errorf("accès refusé")
+	}
+
+	// Récupérer l'utilisateur ciblé
+	var target models.User
+	if err := coll.FindOne(ctx, bson.M{"_id": targetID}).Decode(&target); err != nil {
+		return nil, fmt.Errorf("utilisateur non trouvé")
+	}
+
+	// Masquer le mot de passe
+	target.Password = nil
+	return &target, nil
 }
