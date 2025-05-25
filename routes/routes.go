@@ -190,6 +190,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /roadmap/{id}/steps", getRoadmapSteps)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
+	mux.HandleFunc("GET /roadmaps", getAllPublishedRoadmaps)
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
@@ -2537,6 +2538,35 @@ func getAllRoadmaps(w http.ResponseWriter, r *http.Request) {
 	// Vérifier le rôle de l'utilisateur
 	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour récupérer toutes les roadmaps", http.StatusForbidden)
+		return
+	}
+
+	// Vérifier que la roadmap existe
+	var roadmaps []models.Roadmap
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	cursor, err := roadmapCollection.Find(context.Background(), bson.D{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var roadmap models.Roadmap
+		if err := cursor.Decode(&roadmap); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		roadmaps = append(roadmaps, roadmap)
+	}
+
+	json.NewEncoder(w).Encode(roadmaps)
+}
+
+// Récupérer toutes les roadmaps publiées
+func getAllPublishedRoadmaps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
 
