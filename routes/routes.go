@@ -192,7 +192,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
 	mux.HandleFunc("GET /roadmaps", getAllPublishedRoadmaps)
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
-	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSpecialRoadmap))
+	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSmashHereRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
 	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
 	mux.HandleFunc("PUT /roadmap/{id}/remove-tags", AuthMiddleware(removeTagsFromRoadmap))
@@ -1851,7 +1851,7 @@ func removeRoadmapsFromGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
+	if user.Type == nil || (*user.Type == "user") || (*user.Type != "superadmin") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour ajouter un contenu à une étape", http.StatusForbidden)
 		return
 	}
@@ -1934,7 +1934,7 @@ func removeRoadmapsFromGame(w http.ResponseWriter, r *http.Request) {
 /* ---------- ROADMAPS  ---------- */
 
 // Créer une roadmap (Superadmin uniquement)
-func createSpecialRoadmap(w http.ResponseWriter, r *http.Request) {
+func createSmashHereRoadmap(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
@@ -1971,7 +1971,7 @@ func createSpecialRoadmap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
 		return
 	}
@@ -2134,9 +2134,9 @@ func createRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
+	// Vérifier l'utilisateur est connecté
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé : Vous n'êtes pas connecté.", http.StatusForbidden)
 		return
 	}
 
@@ -2536,7 +2536,7 @@ func getAllRoadmaps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour récupérer toutes les roadmaps", http.StatusForbidden)
 		return
 	}
@@ -3544,7 +3544,7 @@ func getAllSteps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour récupérer toutes les étapes", http.StatusForbidden)
 		return
 	}
@@ -4461,7 +4461,7 @@ func createTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
 		return
 	}
@@ -4532,7 +4532,7 @@ func addTagToRoadmaps(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
 		return
 	}
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé", http.StatusForbidden)
 		return
 	}
@@ -4665,7 +4665,7 @@ func deleteOneTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour supprimer un tag", http.StatusForbidden)
 		return
 	}
@@ -4729,7 +4729,7 @@ func updateOneTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.Type == nil || (*user.Type == "user") || (*user.Type == "coach") {
+	if user.Type == nil || (*user.Type == "user") {
 		http.Error(w, "Accès refusé", http.StatusForbidden)
 		return
 	}
