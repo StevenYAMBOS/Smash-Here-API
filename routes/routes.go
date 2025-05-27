@@ -205,6 +205,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("PUT /step/{id}", AuthMiddleware(updateOneStep))
 	mux.HandleFunc("PUT /steps/{id}/roadmaps", AuthMiddleware(addStepToRoadmaps))
 	mux.HandleFunc("GET /step/{id}", getOneStep)
+	mux.HandleFunc("GET /step/{id}/contents", getContentsFromStep)
 	mux.HandleFunc("GET /superadmin/steps", AuthMiddleware(getAllSteps))
 	mux.HandleFunc("DELETE /step/{id}", AuthMiddleware(deleteOneStep))
 	// Contenus
@@ -3895,6 +3896,57 @@ func addStepToRoadmaps(w http.ResponseWriter, r *http.Request) {
 		"updated_by":      user.Email,
 		"updated_at":      time.Now(),
 	})
+}
+
+// Récupérer la liste des contenus d'une roadmap
+func getContentsFromStep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Extraire l’ID du jeu depuis l’URL
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 4 || pathParts[1] != "step" {
+		log.Println(pathParts)
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+	stepIDStr := pathParts[2]
+	stepID, err := primitive.ObjectIDFromHex(stepIDStr)
+	if err != nil {
+		http.Error(w, "ID de l'étape invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifier que l'étape existe
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	var step models.Step
+	err = stepCollection.FindOne(ctx, bson.M{"_id": stepID}).Decode(&step)
+	if err != nil {
+		http.Error(w, "L'étape spécifiée n'existe pas", http.StatusNotFound)
+		return
+	}
+
+	// Récupérer les contenus
+	contentCollection := database.Client.Database("smashheredb").Collection("content")
+	cursor, err := contentCollection.Find(ctx, bson.M{"_id": bson.M{"$in": step.Contents}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des contenus", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var contents []models.Content
+	if err := cursor.All(ctx, &contents); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(contents)
 }
 
 /* ---------- CONTENUS  ---------- */
