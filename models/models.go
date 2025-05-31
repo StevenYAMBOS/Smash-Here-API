@@ -40,6 +40,7 @@ type User struct {
 	LastLogin       time.Time            `bson:"lastLogin,omitempty" json:"lastLogin"`
 	Bookmarks       []primitive.ObjectID `bson:"Bookmarks,omitempty" json:"Bookmarks"`
 	StepsCreated    []primitive.ObjectID `bson:"StepsCreated,omitempty" json:"StepsCreated"`
+	ContentsCreated []primitive.ObjectID `bson:"ContentsCreated,omitempty" json:"ContentsCreated"`
 	RoadmapsCreated []primitive.ObjectID `bson:"RoadmapsCreated,omitempty" json:"RoadmapsCreated"`
 	RoadmapsStarted []primitive.ObjectID `bson:"RoadmapsStarted,omitempty" json:"RoadmapsStarted"`
 	Comments        []primitive.ObjectID `bson:"Comments,omitempty" json:"Comments"`

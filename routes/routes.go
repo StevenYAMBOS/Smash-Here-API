@@ -174,6 +174,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("POST /auth/login", login)
 	// Utilisateur
 	mux.HandleFunc("GET /user/roadmaps", AuthMiddleware(getUserRoadmaps))
+	mux.HandleFunc("GET /user/bookmarks", AuthMiddleware(getUserBookmarks))
 	mux.HandleFunc("GET /user/comments", AuthMiddleware(getUserComments))
 	mux.HandleFunc("POST /roadmap/{id}/comments", AuthMiddleware(addCommentToRoadmap))
 	mux.HandleFunc("GET /roadmap/{id}/comments", AuthMiddleware(getRoadmapComments))
@@ -824,6 +825,56 @@ func getUserRoadmaps(w http.ResponseWriter, r *http.Request) {
 	// Récupérer les roadmaps de l'utilisateur depuis le champ `RoadmapsCreated`
 	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
 	cursor, err := roadmapCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.RoadmapsCreated}})
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération des roadmaps", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var roadmaps []models.Roadmap
+	if err := cursor.All(ctx, &roadmaps); err != nil {
+		http.Error(w, "Erreur lors du parsing des données", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(roadmaps)
+}
+
+// Récupérer les bookmarks d'un utilisateur
+func getUserBookmarks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer les roadmaps de l'utilisateur depuis le champ `Bookmarks`
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	cursor, err := roadmapCollection.Find(ctx, bson.M{"_id": bson.M{"$in": user.Bookmarks}})
 	if err != nil {
 		http.Error(w, "Erreur lors de la récupération des roadmaps", http.StatusInternalServerError)
 		return
@@ -1972,7 +2023,7 @@ func createSmashHereRoadmap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
+	if user.Type == nil || (*user.Type == "user") && (*user.Type != "superadmin") {
 		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
 		return
 	}
@@ -4023,6 +4074,22 @@ func createContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Insérer dans l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$addToSet": bson.M{
+			"ContentsCreated": content.ID,
+		},
+		"$set": bson.M{
+			"UpdatedAt": time.Now(),
+			"UpdatedBy": user.ID,
+		},
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erreur lors de la mise à jour de l'utilisateur : %s", content.ID.Hex()), http.StatusInternalServerError)
+		return
+	}
+
 	// Réponse de succès
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Contenu créé avec succès"})
@@ -4439,9 +4506,8 @@ func deleteOneContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour supprimer une roadmap", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Utilisateur invalide", http.StatusForbidden)
 		return
 	}
 
@@ -4467,6 +4533,14 @@ func deleteOneContent(w http.ResponseWriter, r *http.Request) {
 		ctx,
 		bson.M{"Contents": contentID},
 		bson.M{"$pull": bson.M{"Contents": contentID}},
+	)
+
+	// Supprimer le contenu de l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	userCollection.UpdateOne(
+		ctx,
+		bson.M{"ContentsCreated": contentID},
+		bson.M{"$pull": bson.M{"ContentsCreated": contentID}},
 	)
 
 	json.NewEncoder(w).Encode(result)
