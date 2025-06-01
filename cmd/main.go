@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/StevenYAMBOS/Smash-Here-API/database"
 	"github.com/StevenYAMBOS/Smash-Here-API/routes"
@@ -23,6 +24,9 @@ func main() {
 	database.InitDatabase()
 	database.InitS3Client()
 	PORT := os.Getenv("PORT")
+	if !strings.HasPrefix(PORT, ":") {
+		PORT = ":" + PORT
+	}
 	router := routes.Router()
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173"},

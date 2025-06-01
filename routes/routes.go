@@ -3489,8 +3489,8 @@ func createStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une étape", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé : Vous n'êtes pas connecté.", http.StatusForbidden)
 		return
 	}
 
@@ -3520,6 +3520,22 @@ func createStep(w http.ResponseWriter, r *http.Request) {
 	_, err = stepCollection.InsertOne(ctx, step)
 	if err != nil {
 		http.Error(w, "Erreur lors de l'ajout de l'étape", http.StatusInternalServerError)
+		return
+	}
+
+	// Insérer dans l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{
+		"$addToSet": bson.M{
+			"StepsCreated": step.ID,
+		},
+		"$set": bson.M{
+			"UpdatedAt": time.Now(),
+			"UpdatedBy": user.ID,
+		},
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erreur lors de la mise à jour de l'utilisateur : %s", step.ID.Hex()), http.StatusInternalServerError)
 		return
 	}
 
@@ -3811,6 +3827,14 @@ func deleteOneStep(w http.ResponseWriter, r *http.Request) {
 		bson.M{"$pull": bson.M{"Steps": stepID}},
 	)
 
+	// Supprimer le contenu de l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	userCollection.UpdateOne(
+		ctx,
+		bson.M{"StepsCreated": stepID},
+		bson.M{"$pull": bson.M{"StepsCreated": stepID}},
+	)
+
 	json.NewEncoder(w).Encode(result)
 	w.Write([]byte("Étape supprimée avec succès"))
 }
@@ -4040,8 +4064,8 @@ func createContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une étape", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé : Vous n'êtes pas connecté.", http.StatusForbidden)
 		return
 	}
 
