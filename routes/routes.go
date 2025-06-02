@@ -3797,8 +3797,8 @@ func deleteOneStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour supprimer une roadmap", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé : Vous n'êtes pas connecté.", http.StatusForbidden)
 		return
 	}
 
