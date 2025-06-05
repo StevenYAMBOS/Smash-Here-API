@@ -16,6 +16,8 @@ import (
 
 	"github.com/StevenYAMBOS/Smash-Here-API/database"
 	"github.com/StevenYAMBOS/Smash-Here-API/models"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
@@ -170,6 +172,7 @@ func Router() *http.ServeMux {
 
 	// Authentification
 	mux.HandleFunc("/", home)
+	mux.HandleFunc("/test", testS3Connexion)
 	mux.HandleFunc("POST /auth/register", register)
 	mux.HandleFunc("POST /auth/login", login)
 	// Utilisateur
@@ -186,18 +189,19 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("PUT /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(updateCommentToRoadmap))
 	mux.HandleFunc("DELETE /user", AuthMiddleware(deleteCurrentUser))
 	mux.HandleFunc("GET /user/{id}", AuthMiddleware(getUserById))
-
 	// Roadmap
+	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
+	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSmashHereRoadmap))
+	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
+	mux.HandleFunc("PUT /roadmap/{id}/info", AuthMiddleware(updateRoadmapInfo))
+	mux.HandleFunc("PUT /roadmap/{id}/steps", AuthMiddleware(updateRoadmapSteps))
 	mux.HandleFunc("GET /roadmap/{id}", getRoadmap)
 	mux.HandleFunc("GET /roadmap/{id}/steps", getRoadmapSteps)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
 	mux.HandleFunc("GET /roadmaps", getAllPublishedRoadmaps)
-	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
-	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSmashHereRoadmap))
 	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
-	mux.HandleFunc("PUT /roadmap/{id}", AuthMiddleware(updateOneRoadmap))
 	mux.HandleFunc("PUT /roadmap/{id}/remove-tags", AuthMiddleware(removeTagsFromRoadmap))
-	mux.HandleFunc("DELETE /superadmin/roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
+	mux.HandleFunc("DELETE /roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
 	mux.HandleFunc("DELETE /roadmap/{id}/step/{stepId}", AuthMiddleware(removeStepFromRoadmap))
 	mux.HandleFunc("PATCH /roadmap/{id}/publish", AuthMiddleware(publishRoadmap))
 	mux.HandleFunc("PATCH /roadmap/{id}/premium", AuthMiddleware(setRoadmapPremium))
@@ -240,6 +244,20 @@ func Router() *http.ServeMux {
 func home(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Bienvenue sur Smash Here"))
+}
+
+// Test connexion au bucket AWS
+func testS3Connexion(w http.ResponseWriter, _ *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := database.S3Client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(os.Getenv("AWS_S3_BUCKET_NAME")),
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Impossible d’accéder au bucket S3 : %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("Connexion S3 réussie"))
 }
 
 /* ---------- AUTHENTIFICATION  ---------- */
@@ -317,7 +335,7 @@ func register(w http.ResponseWriter, r *http.Request) {
 	// URL de l'image
 	imageURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 		os.Getenv("AWS_S3_BUCKET_NAME"),
-		os.Getenv("AWS_S3_REGION"),
+		os.Getenv("AWS_REGION"),
 		objectKey,
 	)
 
@@ -564,7 +582,7 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			imageURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 				os.Getenv("AWS_S3_BUCKET_NAME"),
-				os.Getenv("AWS_S3_REGION"),
+				os.Getenv("AWS_REGION"),
 				objectKey,
 			)
 			updateFields["profilePicture"] = imageURL
@@ -1578,7 +1596,7 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 	// URL de l'image
 	coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 		os.Getenv("AWS_S3_BUCKET_NAME"),
-		os.Getenv("AWS_S3_REGION"),
+		os.Getenv("AWS_REGION"),
 		objectKey,
 	)
 
@@ -1764,7 +1782,7 @@ func updateOneGame(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 				os.Getenv("AWS_S3_BUCKET_NAME"),
-				os.Getenv("AWS_S3_REGION"),
+				os.Getenv("AWS_REGION"),
 				objectKey,
 			)
 			updateFields["cover"] = coverURL
@@ -2089,7 +2107,7 @@ func createSmashHereRoadmap(w http.ResponseWriter, r *http.Request) {
 	// URL de l'image
 	coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 		os.Getenv("AWS_S3_BUCKET_NAME"),
-		os.Getenv("AWS_S3_REGION"),
+		os.Getenv("AWS_REGION"),
 		objectKey,
 	)
 
@@ -2253,7 +2271,7 @@ func createRoadmap(w http.ResponseWriter, r *http.Request) {
 	// URL de l'image
 	coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 		os.Getenv("AWS_S3_BUCKET_NAME"),
-		os.Getenv("AWS_S3_REGION"),
+		os.Getenv("AWS_REGION"),
 		objectKey,
 	)
 
@@ -2786,13 +2804,13 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
 		return
 	}
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé, vous devez être connecté", http.StatusForbidden)
 		return
 	}
 
 	// ID roadmap
-	roadmapIdStr := strings.TrimPrefix(r.URL.Path, "/superadmin/roadmap/")
+	roadmapIdStr := strings.TrimPrefix(r.URL.Path, "/roadmap/")
 	roadmapID, err := primitive.ObjectIDFromHex(roadmapIdStr)
 	if err != nil {
 		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
@@ -2848,7 +2866,7 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	/*  Suppression des commentaires de la roadmap */
+	/*  Suppression des commentaires de la roadmap
 	commentCollection := database.Client.Database("smashheredb").Collection("comment")
 
 	// Étape 1 : récupérer les commentaires associés à la roadmap
@@ -2886,6 +2904,7 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erreur lors de la suppression des commentaires", http.StatusInternalServerError)
 		return
 	}
+	*/
 
 	// Suppression de la roadmap
 	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
@@ -2940,8 +2959,8 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé, vous devez être connecté", http.StatusForbidden)
 		return
 	}
 
@@ -2958,8 +2977,8 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	description := r.FormValue("description")
 	subTitle := r.FormValue("subTitle")
-	published := r.FormValue("published")
-	premium := r.FormValue("premium")
+	publishedStr := r.FormValue("published")
+	premiumStr := r.FormValue("premium")
 	Steps := r.FormValue("Steps")
 	Games := r.FormValue("Games")
 	Tags := r.FormValue("Tags")
@@ -2984,7 +3003,7 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 				os.Getenv("AWS_S3_BUCKET_NAME"),
-				os.Getenv("AWS_S3_REGION"),
+				os.Getenv("AWS_REGION"),
 				objectKey,
 			)
 			updateFields["cover"] = coverURL
@@ -3000,11 +3019,21 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 	if subTitle != "" {
 		updateFields["subTitle"] = subTitle
 	}
-	if published != "" {
-		updateFields["published"] = published
+	if publishedStr != "" {
+		pub, err := strconv.ParseBool(publishedStr)
+		if err != nil {
+			http.Error(w, "Valeur de published invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["published"] = pub
 	}
-	if premium != "" {
-		updateFields["premium"] = premium
+	if premiumStr != "" {
+		pr, err := strconv.ParseBool(premiumStr)
+		if err != nil {
+			http.Error(w, "Valeur de premium invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["premium"] = pr
 	}
 	if Games != "" {
 		gameIDs, err := parseObjectIDArray(Games)
@@ -3058,6 +3087,248 @@ func updateOneRoadmap(w http.ResponseWriter, r *http.Request) {
 		"message":    "Roadmap modifiée avec succès",
 		"updated_at": time.Now(),
 		"modified":   result.ModifiedCount,
+	})
+}
+
+// Modifier les informations d'une roadmap
+func updateRoadmapInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lire les données multipart (image + champs)
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé, vous devez être connecté", http.StatusForbidden)
+		return
+	}
+
+	// Récupérer l'ID de la roadmap
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+	roadmapIDStr := pathParts[2] // L'ID est en position 2 dans "/roadmap/{id}/info"
+	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
+	if err != nil {
+		http.Error(w, "ID de roadmap invalide", http.StatusBadRequest)
+		return
+	}
+
+	// Body à mettre à jour
+	// var updatedRoadmap models.Roadmap
+	title := r.FormValue("title")
+	description := r.FormValue("description")
+	subTitle := r.FormValue("subTitle")
+	publishedStr := r.FormValue("published")
+	premiumStr := r.FormValue("premium")
+	Games := r.FormValue("Games")
+
+	// Construction du $set dynamique
+	updateFields := bson.M{}
+
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("cover")
+	if err == nil {
+		defer file.Close()
+		imageData, _ := io.ReadAll(file)
+		ext := filepath.Ext(fileHeader.Filename)
+		safeTitle := title
+		if safeTitle == "" {
+			safeTitle = "cover"
+		}
+		cleanTitle := strings.ReplaceAll(title, " ", "_")
+		cleanTitle = strings.ReplaceAll(cleanTitle, "/", "_")
+		cleanTitle = strings.ReplaceAll(cleanTitle, "\\", "_")
+		timestamp := time.Now().Unix()
+		objectKey := fmt.Sprintf("roadmap/%s_%d%s", cleanTitle, timestamp, ext)
+
+		s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+		err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+		if err == nil {
+			coverURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+				os.Getenv("AWS_S3_BUCKET_NAME"),
+				os.Getenv("AWS_REGION"),
+				objectKey,
+			)
+			updateFields["cover"] = coverURL
+		}
+	}
+
+	if title != "" {
+		updateFields["title"] = title
+	}
+	if description != "" {
+		updateFields["description"] = description
+	}
+	if subTitle != "" {
+		updateFields["subTitle"] = subTitle
+	}
+	if publishedStr != "" {
+		pub, err := strconv.ParseBool(publishedStr)
+		if err != nil {
+			http.Error(w, "Valeur de published invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["published"] = pub
+	}
+	if premiumStr != "" {
+		pr, err := strconv.ParseBool(premiumStr)
+		if err != nil {
+			http.Error(w, "Valeur de premium invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["premium"] = pr
+	}
+	if Games != "" {
+		gameIDs, err := parseObjectIDArray(Games)
+		if err != nil {
+			http.Error(w, "Liste de jeux invalide", http.StatusBadRequest)
+			return
+		}
+		updateFields["Games"] = gameIDs
+	}
+
+	updateFields["UpdatedAt"] = time.Now()
+	updateFields["UpdatedBy"] = user.ID
+
+	// Si aucun champ modifié
+	if len(updateFields) == 0 {
+		http.Error(w, "Aucun champ valide à modifier", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"_id": roadmapID}
+	update := bson.M{"$set": updateFields}
+	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
+	result, err := roadmapCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
+		return
+	}
+	if result.MatchedCount == 0 {
+		http.Error(w, "Aucune roadmap trouvée", http.StatusNotFound)
+		return
+	}
+
+	// Réponse OK
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Roadmap modifiée avec succès",
+		"updated_at": time.Now(),
+		"modified":   result.ModifiedCount,
+	})
+}
+
+// Modifier les étapes d'une roadmap
+func updateRoadmapSteps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lire les données multipart (image + champs)
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
+	// Authentification
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Token manquant", http.StatusUnauthorized)
+		return
+	}
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	email, err := extractEmailFromToken(tokenString)
+	if err != nil {
+		http.Error(w, "Token invalide", http.StatusUnauthorized)
+		return
+	}
+
+	// Récupérer l'utilisateur
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Utilisateur non trouvé", http.StatusUnauthorized)
+		return
+	}
+
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé, vous devez être connecté", http.StatusForbidden)
+		return
+	}
+
+	// Vérif méthode POST ou PUT
+	r.ParseForm()
+	pathParts := strings.Split(r.URL.Path, "/")
+
+	if len(pathParts) < 4 || pathParts[1] != "roadmap" || pathParts[3] != "steps" {
+		http.Error(w, "URL invalide", http.StatusBadRequest)
+		return
+	}
+
+	roadmapIDStr := pathParts[2]
+	roadmapID, _ := primitive.ObjectIDFromHex(roadmapIDStr)
+	stepIDsStr := r.FormValue("Steps")
+
+	objIDs := []primitive.ObjectID{}
+	for _, sid := range strings.Split(stepIDsStr, ",") {
+		oid, err := primitive.ObjectIDFromHex(sid)
+		if err != nil { /* 400 Bad Request */
+		}
+		objIDs = append(objIDs, oid)
+	}
+
+	_, err = database.Client.Database("smashheredb").Collection("roadmap").UpdateOne(context.Background(), bson.M{"_id": roadmapID},
+		bson.M{"$set": bson.M{"Steps": objIDs}},
+	)
+	if err != nil {
+		http.Error(w, "Erreur lors de la mise à jour", http.StatusInternalServerError)
+	}
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":    "Étapes de la roadmap modifiées avec succès",
+		"updated_at": time.Now(),
+		"RoadmapID":  roadmapID,
+		"Steps":      objIDs,
 	})
 }
 
