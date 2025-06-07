@@ -3309,11 +3309,18 @@ func updateRoadmapSteps(w http.ResponseWriter, r *http.Request) {
 	stepIDsStr := r.FormValue("Steps")
 
 	objIDs := []primitive.ObjectID{}
-	for _, sid := range strings.Split(stepIDsStr, ",") {
-		oid, err := primitive.ObjectIDFromHex(sid)
-		if err != nil { /* 400 Bad Request */
+	if stepIDsStr != "" {
+		for _, sid := range strings.Split(stepIDsStr, ",") {
+			sid = strings.TrimSpace(sid) // Supprimer les espaces
+			if sid != "" {               // Vérifier que l'ID n'est pas vide
+				oid, err := primitive.ObjectIDFromHex(sid)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("ID d'étape invalide: %s", sid), http.StatusBadRequest)
+					return
+				}
+				objIDs = append(objIDs, oid)
+			}
 		}
-		objIDs = append(objIDs, oid)
 	}
 
 	_, err = database.Client.Database("smashheredb").Collection("roadmap").UpdateOne(context.Background(), bson.M{"_id": roadmapID},
