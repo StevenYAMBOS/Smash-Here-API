@@ -199,7 +199,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("GET /roadmap/{id}/steps", getRoadmapSteps)
 	mux.HandleFunc("GET /superadmin/roadmaps", AuthMiddleware(getAllRoadmaps))
 	mux.HandleFunc("GET /roadmaps", getAllPublishedRoadmaps)
-	mux.HandleFunc("PUT /superadmin/roadmaps/{id}/games", AuthMiddleware(addRoadmapToGames))
+	mux.HandleFunc("PUT /roadmap/{id}/games", AuthMiddleware(addRoadmapToGames))
 	mux.HandleFunc("PUT /roadmap/{id}/remove-tags", AuthMiddleware(removeTagsFromRoadmap))
 	mux.HandleFunc("DELETE /roadmap/{id}", AuthMiddleware(deleteOneRoadmap))
 	mux.HandleFunc("DELETE /roadmap/{id}/step/{stepId}", AuthMiddleware(removeStepFromRoadmap))
@@ -2369,20 +2369,20 @@ func addRoadmapToGames(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vérifier le rôle de l'utilisateur
-	if user.Type == nil || (*user.Type == "user") {
-		http.Error(w, "Accès refusé : Vous n'avez pas les permissions pour créer une roadmap", http.StatusForbidden)
+	if user.ID.IsZero() {
+		http.Error(w, "Accès refusé : Vous devez être connecté.", http.StatusForbidden)
 		return
 	}
 
 	// Extraire l’ID de roadmap depuis l’URL
 	pathParts := strings.Split(r.URL.Path, "/")
 
-	if len(pathParts) < 5 || pathParts[4] != "games" {
+	if len(pathParts) < 4 || pathParts[3] != "games" {
 		http.Error(w, "URL invalide", http.StatusBadRequest)
 		return
 	}
 
-	roadmapIDStr := pathParts[3]
+	roadmapIDStr := pathParts[2]
 
 	roadmapID, err := primitive.ObjectIDFromHex(roadmapIDStr)
 	if err != nil {
