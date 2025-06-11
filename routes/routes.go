@@ -189,6 +189,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("PUT /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(updateCommentToRoadmap))
 	mux.HandleFunc("DELETE /user", AuthMiddleware(deleteCurrentUser))
 	mux.HandleFunc("GET /user/{id}", AuthMiddleware(getUserById))
+	mux.HandleFunc("POST /contact", addContact)
 	// Roadmap
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
 	mux.HandleFunc("POST /superadmin/roadmap", AuthMiddleware(createSmashHereRoadmap))
@@ -1488,6 +1489,101 @@ func getUserById(w http.ResponseWriter, r *http.Request) {
 	targetUser.Password = nil
 
 	json.NewEncoder(w).Encode(targetUser)
+}
+
+// Envoyer le formulaire de contact
+func addContact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lire les données multipart (image + champs)
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Erreur de parsing multipart", http.StatusBadRequest)
+		return
+	}
+
+	// Champs texte
+	email := r.FormValue("email")
+	category := r.FormValue("category")
+	priority := r.FormValue("priority")
+	subject := r.FormValue("subject")
+	message := r.FormValue("message")
+
+	if email == "" || category == "" || subject == "" || priority == "" || message == "" {
+		http.Error(w, "Tous les champs sont obligatoires", http.StatusBadRequest)
+		return
+	}
+
+	// Vérifie que l'email contient au moins une lettre
+	matched, _ := regexp.MatchString(`[A-Za-z]`, email)
+	if !matched {
+		http.Error(w, "L'email doit contenir au moins une lettre", http.StatusBadRequest)
+		return
+	}
+
+	var imageURL *string = nil
+
+	// Traitement de l'image (champ `image`)
+	file, fileHeader, err := r.FormFile("image")
+	if err == nil && file != nil {
+		defer file.Close()
+
+		imageData, err := io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "Erreur de lecture de l'image", http.StatusInternalServerError)
+			return
+		}
+
+		// Nom du fichier S3
+		ext := filepath.Ext(fileHeader.Filename)
+		objectKey := fmt.Sprintf("contact/%s%s", email, ext)
+
+		// Upload sur S3
+		s3Uploader := database.BucketBasics{S3Client: database.S3Client}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		err = s3Uploader.UploadLargeObject(ctx, os.Getenv("AWS_S3_BUCKET_NAME"), objectKey, imageData)
+		if err != nil {
+			http.Error(w, "Erreur d'upload sur S3", http.StatusInternalServerError)
+			return
+		}
+
+		// URL de l'image
+		imageURLStr := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+			os.Getenv("AWS_S3_BUCKET_NAME"),
+			os.Getenv("AWS_REGION"),
+			objectKey,
+		)
+		imageURL = &imageURLStr
+	}
+
+	contact := models.Contact{
+		Email:     &email,
+		Category:  &category,
+		Priority:  &priority,
+		Subject:   &subject,
+		Message:   &message,
+		Image:     imageURL,
+		CreatedAt: time.Now(),
+	}
+
+	contactCollection := database.Client.Database("smashheredb").Collection("contact")
+
+	_, err = contactCollection.InsertOne(r.Context(), contact)
+	if err != nil {
+		http.Error(w, "Erreur lors de l'enregistrement", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":                    "Formulaire de contact validé avec succès",
+		"Informations du formulaire": contact,
+	})
 }
 
 /* ---------- JEUX  ---------- */

@@ -149,3 +149,14 @@ type Comment struct {
 	CreatedAt time.Time            `bson:"createdAt,omitempty" json:"createdAt"`
 	UpdatedAt time.Time            `bson:"updatedAt,omitempty" json:"updatedAt"`
 }
+
+// Contact
+type Contact struct {
+	Email     *string   `bson:"email,omitempty" json:"email"`
+	Category  *string   `bson:"category,omitempty" json:"category"` // "technical" | "account" | "roadmap" | "billing" | "feature" | "bug" | "other"
+	Priority  *string   `bson:"priority,omitempty" json:"priority"` // "low" | "medium" | "high" | "urgent"
+	Subject   *string   `bson:"subject,omitempty" json:"subject"`
+	Message   *string   `bson:"message,omitempty" json:"message"`
+	Image     *string   `bson:"image,omitempty" json:"image,omitempty"`
+	CreatedAt time.Time `bson:"createdAt,omitempty" json:"createdAt"`
+}
