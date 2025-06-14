@@ -727,7 +727,7 @@ func addRoadmapToBookmarks(w http.ResponseWriter, r *http.Request) {
 
 // Retirer une roadmap des favoris
 func removeRoadmapToBookmarks(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
+	if r.Method != http.MethodDelete {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
@@ -2739,7 +2739,8 @@ func getAllPublishedRoadmaps(w http.ResponseWriter, r *http.Request) {
 	// Vérifier que la roadmap existe
 	var roadmaps []models.Roadmap
 	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
-	cursor, err := roadmapCollection.Find(context.Background(), bson.D{})
+	filter := bson.D{{Key: "published", Value: true}}
+	cursor, err := roadmapCollection.Find(context.Background(), filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
