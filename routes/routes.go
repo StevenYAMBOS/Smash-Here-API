@@ -188,7 +188,7 @@ func Router() *http.ServeMux {
 	mux.HandleFunc("DELETE /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(deleteCommentToRoadmap))
 	mux.HandleFunc("PUT /roadmap/{roadmapId}/comment/{commentId}", AuthMiddleware(updateCommentToRoadmap))
 	mux.HandleFunc("DELETE /user", AuthMiddleware(deleteCurrentUser))
-	mux.HandleFunc("GET /user/{id}", AuthMiddleware(getUserById))
+	mux.HandleFunc("GET /user/{id}", getUserById)
 	mux.HandleFunc("POST /contact", addContact)
 	// Roadmap
 	mux.HandleFunc("POST /roadmap", AuthMiddleware(createRoadmap))
@@ -343,12 +343,15 @@ func register(w http.ResponseWriter, r *http.Request) {
 	// Hash du mot de passe
 	hashed := HashPassword(password)
 
+	typeStr := "user"
+
 	// Construction de l'utilisateur
 	user := models.User{
 		ID:             primitive.NewObjectID(),
 		Username:       &username,
 		Email:          &email,
 		Password:       &hashed,
+		Type:           &typeStr,
 		ProfilePicture: &imageURL,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
@@ -552,6 +555,7 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Body à mettre à jour
 	username := r.FormValue("username")
+	password := r.FormValue("password")
 
 	// Pseudo pas plus long que 30 caractères
 	if len(username) > 30 {
@@ -564,6 +568,11 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 	matched, _ := regexp.MatchString(`[A-Za-z]`, username)
 	if !matched {
 		http.Error(w, `{"error":"Le pseudo doit contenir au moins une lettre"}`, http.StatusBadRequest)
+		return
+	}
+
+	if len(password) < 6 {
+		http.Error(w, "Le mot de passe doit contenir au moins 6 caractères", http.StatusBadRequest)
 		return
 	}
 
@@ -590,8 +599,14 @@ func updateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Hash du mot de passe
+	hashed := HashPassword(password)
+
 	if username != "" {
 		updateFields["username"] = username
+	}
+	if password != "" {
+		updateFields["password"] = hashed
 	}
 	updateFields["UpdatedAt"] = time.Now()
 	updateFields["UpdatedBy"] = user.ID
@@ -1450,26 +1465,8 @@ func getUserById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := r.Header.Get("Authorization")
-	if token == "" || !strings.HasPrefix(token, "Bearer ") {
-		http.Error(w, "Token manquant ou invalide", http.StatusUnauthorized)
-		return
-	}
-	email, err := extractEmailFromToken(token[7:])
-	if err != nil {
-		http.Error(w, "Token invalide", http.StatusUnauthorized)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	var currentUser models.User
-	err = database.Client.Database("smashheredb").Collection("user").FindOne(ctx, bson.M{"email": email}).Decode(&currentUser)
-	if err != nil || currentUser.Type == nil || (*currentUser.Type != "coach" && *currentUser.Type != "superadmin") {
-		http.Error(w, "Accès refusé", http.StatusForbidden)
-		return
-	}
 
 	userIDStr := strings.TrimPrefix(r.URL.Path, "/user/")
 	userID, err := primitive.ObjectIDFromHex(userIDStr)
