@@ -2953,12 +2953,12 @@ func deleteOneRoadmap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Suppression des progressions
-	progressionCollection := database.Client.Database("smashheredb").Collection("progression")
-	_, err = progressionCollection.DeleteMany(ctx, bson.M{"Roadmap": roadmapID})
-	if err != nil {
-		http.Error(w, "Erreur lors de la suppression des progressions", http.StatusInternalServerError)
-		return
-	}
+	// progressionCollection := database.Client.Database("smashheredb").Collection("progression")
+	// _, err = progressionCollection.DeleteMany(ctx, bson.M{"Roadmap": roadmapID})
+	// if err != nil {
+	// 	http.Error(w, "Erreur lors de la suppression des progressions", http.StatusInternalServerError)
+	// 	return
+	// }
 
 	/*  Suppression des commentaires de la roadmap
 	commentCollection := database.Client.Database("smashheredb").Collection("comment")
@@ -4183,14 +4183,6 @@ func deleteOneStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Supprimer l'étape
-	stepCollection := database.Client.Database("smashheredb").Collection("step")
-	result, err := stepCollection.DeleteOne(context.Background(), bson.M{"_id": stepID})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	// Supprimer l'étape des roadmaps
 	roadmapCollection := database.Client.Database("smashheredb").Collection("roadmap")
 	roadmapCollection.UpdateMany(
@@ -4199,13 +4191,41 @@ func deleteOneStep(w http.ResponseWriter, r *http.Request) {
 		bson.M{"$pull": bson.M{"Steps": stepID}},
 	)
 
-	// Supprimer le contenu de l'utilisateur
+	// Supprimer l'étape de l'utilisateur
 	userCollection := database.Client.Database("smashheredb").Collection("user")
 	userCollection.UpdateOne(
 		ctx,
 		bson.M{"StepsCreated": stepID},
 		bson.M{"$pull": bson.M{"StepsCreated": stepID}},
 	)
+
+	// Supprimer l'étape du contenu
+	contentCollection := database.Client.Database("smashheredb").Collection("content")
+	contentCollection.UpdateMany(
+		ctx,
+		bson.M{"Steps": stepID},
+		bson.M{"$pull": bson.M{"Steps": stepID}},
+	)
+
+	// Retirer la step des PreviousSteps et NextSteps de toutes les autres étapes
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	stepCollection.UpdateMany(
+		ctx,
+		bson.M{"PreviousSteps": stepID},
+		bson.M{"$pull": bson.M{"PreviousSteps": stepID}},
+	)
+	stepCollection.UpdateMany(
+		ctx,
+		bson.M{"NextSteps": stepID},
+		bson.M{"$pull": bson.M{"NextSteps": stepID}},
+	)
+
+	// Supprimer l'étape
+	result, err := stepCollection.DeleteOne(context.Background(), bson.M{"_id": stepID})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	json.NewEncoder(w).Encode(result)
 	w.Write([]byte("Étape supprimée avec succès"))
@@ -4915,29 +4935,35 @@ func deleteOneContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Supprimer le contenu des étapes
+	stepCollection := database.Client.Database("smashheredb").Collection("step")
+	if _, err := stepCollection.UpdateMany(
+		ctx,
+		bson.M{"Contents": contentID},
+		bson.M{"$pull": bson.M{"Contents": contentID}},
+	); err != nil {
+		http.Error(w, "Erreur lors de la mise à jour des étapes", http.StatusInternalServerError)
+		return
+	}
+
+	// Supprimer le contenu de l'utilisateur
+	userCollection := database.Client.Database("smashheredb").Collection("user")
+	if _, err := userCollection.UpdateOne(
+		ctx,
+		bson.M{"ContentsCreated": contentID},
+		bson.M{"$pull": bson.M{"ContentsCreated": contentID}},
+	); err != nil {
+		http.Error(w, "Erreur lors de la mise à jour de l'utilisateur", http.StatusInternalServerError)
+		return
+	}
+
 	// Supprimer le contenu
 	contentCollection := database.Client.Database("smashheredb").Collection("content")
-	result, err := contentCollection.DeleteOne(context.Background(), bson.M{"_id": contentID})
+	result, err := contentCollection.DeleteOne(ctx, bson.M{"_id": contentID})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Supprimer le contenu des étapes
-	stepCollection := database.Client.Database("smashheredb").Collection("step")
-	stepCollection.UpdateMany(
-		ctx,
-		bson.M{"Contents": contentID},
-		bson.M{"$pull": bson.M{"Contents": contentID}},
-	)
-
-	// Supprimer le contenu de l'utilisateur
-	userCollection := database.Client.Database("smashheredb").Collection("user")
-	userCollection.UpdateOne(
-		ctx,
-		bson.M{"ContentsCreated": contentID},
-		bson.M{"$pull": bson.M{"ContentsCreated": contentID}},
-	)
 
 	json.NewEncoder(w).Encode(result)
 	w.Write([]byte("Contenu supprimé avec succès"))
